@@ -11,7 +11,10 @@ class RuntimeCommands(commands.Cog):
 
     @commands.group(name="model", invoke_without_command=True, help="Switch or inspect the active LLM model at runtime.")
     async def model_group(self, ctx: commands.Context):
-        await ctx.send("Use `!model current`, `!model list`, `!model set <model>`, `!model sync`, or `!model add <provider> <model>`.")
+        await ctx.send(
+            self.runtime.get_current_model_text("llm")
+            + "\n\nUse `!model list`, `!model current`, `!model switch <model>`, `!model pull <model>`, `!model reload`, `!model sync`, or `!model add <provider> <model>`."
+        )
 
     @model_group.command(name="current", help="Show the active LLM provider and model.")
     async def model_current(self, ctx: commands.Context):
@@ -26,6 +29,20 @@ class RuntimeCommands(commands.Cog):
         _ok, message = await self.runtime.set_active_model("llm", model_name)
         await ctx.send(message)
 
+    @model_group.command(name="switch", help="Switch the active LLM model at runtime.")
+    async def model_switch(self, ctx: commands.Context, *, model_name: str):
+        _ok, message = await self.runtime.set_active_model("llm", model_name)
+        await ctx.send(message)
+
+    @model_group.command(name="pull", help="Pull or install a model into local/provider-managed storage.")
+    async def model_pull(self, ctx: commands.Context, *, model_name: str):
+        _ok, message = await self.runtime.pull_model("llm", model_name)
+        await ctx.send(message)
+
+    @model_group.command(name="reload", help="Reload model discovery, runtime state, and storage-backed models.")
+    async def model_reload(self, ctx: commands.Context):
+        await ctx.send(await self.runtime.reload_runtime_state())
+
     @model_group.command(name="sync", help="Discover LLM models from supported providers and local storage.")
     async def model_sync(self, ctx: commands.Context):
         result = await self.runtime.sync_models("llm")
@@ -38,7 +55,10 @@ class RuntimeCommands(commands.Cog):
 
     @commands.group(name="imagemodel", invoke_without_command=True, help="Switch or inspect the active image model at runtime.")
     async def image_model_group(self, ctx: commands.Context):
-        await ctx.send("Use `!imagemodel current`, `!imagemodel list`, `!imagemodel set <model>`, `!imagemodel sync`, or `!imagemodel add <provider> <model>`.")
+        await ctx.send(
+            self.runtime.get_current_model_text("image")
+            + "\n\nUse `!imagemodel current`, `!imagemodel list`, `!imagemodel switch <model>`, `!imagemodel pull <model>`, `!imagemodel reload`, `!imagemodel sync`, or `!imagemodel add <provider> <model>`."
+        )
 
     @image_model_group.command(name="current", help="Show the active image provider and model.")
     async def image_model_current(self, ctx: commands.Context):
@@ -52,6 +72,20 @@ class RuntimeCommands(commands.Cog):
     async def image_model_set(self, ctx: commands.Context, *, model_name: str):
         _ok, message = await self.runtime.set_active_model("image", model_name)
         await ctx.send(message)
+
+    @image_model_group.command(name="switch", help="Switch the active image model at runtime.")
+    async def image_model_switch(self, ctx: commands.Context, *, model_name: str):
+        _ok, message = await self.runtime.set_active_model("image", model_name)
+        await ctx.send(message)
+
+    @image_model_group.command(name="pull", help="Pull or install an image model into local/provider-managed storage.")
+    async def image_model_pull(self, ctx: commands.Context, *, model_name: str):
+        _ok, message = await self.runtime.pull_model("image", model_name)
+        await ctx.send(message)
+
+    @image_model_group.command(name="reload", help="Reload image model discovery and runtime state.")
+    async def image_model_reload(self, ctx: commands.Context):
+        await ctx.send(await self.runtime.reload_runtime_state())
 
     @image_model_group.command(name="sync", help="Discover image models from supported providers and local storage.")
     async def image_model_sync(self, ctx: commands.Context):

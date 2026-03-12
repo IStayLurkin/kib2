@@ -17,6 +17,15 @@ COMMAND_ERROR_THRESHOLD_MS = 8000
 SERVICE_INFO_THRESHOLD_MS = 3000
 SERVICE_WARNING_THRESHOLD_MS = 5000
 SERVICE_ERROR_THRESHOLD_MS = 8000
+SUPPRESSED_SERVICE_PREFIXES = ("startup.", "llm.")
+TOP_LEVEL_LABELS = {
+    "chat.generate_dynamic_reply": "Reply sent",
+    "model_storage.pull.ollama": "Model pull finished",
+    "code_execution.run_file": "Code run finished",
+    "image.generate_image": "Image generation finished",
+    "voice.text_to_speech": "Voice generation finished",
+    "video.generate_video": "Video generation finished",
+}
 
 
 @dataclass(slots=True)
@@ -77,7 +86,7 @@ class PerformanceTracker:
         name: str,
         duration_ms: float,
     ) -> None:
-        if name.startswith("startup."):
+        if category == "service" and name.startswith(SUPPRESSED_SERVICE_PREFIXES):
             return
 
         severity = self._get_severity(duration_ms, category)
@@ -92,13 +101,15 @@ class PerformanceTracker:
             created_at=time.time(),
         )
         self.recent_slow_operations.append(record)
-        message = "[perf] status=success category=%s name=%s duration_ms=%.2f severity=%s"
+        label = TOP_LEVEL_LABELS.get(name, name)
+        seconds = duration_ms / 1000
 
         if severity == "critical_slow":
-            logger.warning(message, category, name, duration_ms, severity)
+            logger.warning("%s: %.1fs", label, seconds)
             return
 
-        logger.info(message, category, name, duration_ms, severity)
+        if severity == "slow":
+            logger.warning("%s: %.1fs", label, seconds)
 
     def _get_severity(self, duration_ms: float, category: str = "service") -> str | None:
         if category == "command":

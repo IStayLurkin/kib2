@@ -16,6 +16,7 @@ class DevCommands(commands.Cog):
             "cogs.media_commands",
             "cogs.agent_commands",
             "cogs.runtime_commands",
+            "cogs.code_commands",
         ]
 
     @commands.command()

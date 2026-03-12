@@ -239,6 +239,26 @@ async def generate_dynamic_reply(
                 )
 
             lowered = user_text.strip().lower()
+            if lowered in {"use it", "switch to it", "turn it on", "use ollama"}:
+                if model_runtime_service.get_last_runtime_topic() == "ollama_available":
+                    return ChatReply(
+                        content=await model_runtime_service.activate_ollama_default(),
+                        intent="tool_use_request",
+                        response_mode="direct",
+                        goal="switch active llm to ollama",
+                        tool_name="model_runtime",
+                    )
+
+            if lowered in {"why?", "why", "how come?", "how come", "what do you mean?", "what do you mean"}:
+                runtime_reason = model_runtime_service.get_last_runtime_reason()
+                if runtime_reason:
+                    return ChatReply(
+                        content=runtime_reason,
+                        intent="question_answering",
+                        response_mode="direct",
+                        goal="answer runtime follow-up question",
+                    )
+
             if lowered in {"are you using cuda", "are you using gpu", "what device are you using", "are you using my gpu"}:
                 return ChatReply(
                     content=await model_runtime_service.get_hardware_status_text(),

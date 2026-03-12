@@ -9,9 +9,14 @@ from core.config import (
     COMFYUI_BASE_URL,
     COMFYUI_DEFAULT_MODEL,
     CUDA_PREFERRED,
+    DEFAULT_IMAGE_MODEL_PROVIDER,
+    DEFAULT_MODEL_PROVIDER,
+    ENABLED_MODEL_PROVIDERS,
     HF_MODEL,
     IMAGE_PROVIDER,
     LLM_PROVIDER,
+    MODEL_STORAGE_ROOT,
+    OLLAMA_BASE_URL,
     OLLAMA_MODEL,
     OPENAI_IMAGE_MODEL,
     OPENAI_MODEL,
@@ -30,7 +35,7 @@ from services.hardware_service import HardwareService
 
 logger = get_logger(__name__)
 
-LOCAL_MODEL_STORAGE_DIR = Path("bot_dl_storage")
+LOCAL_MODEL_STORAGE_DIR = Path(MODEL_STORAGE_ROOT)
 LLM_DIR = LOCAL_MODEL_STORAGE_DIR / "llm"
 IMAGE_DIR = LOCAL_MODEL_STORAGE_DIR / "image"
 IMAGE_HINTS = ("sd", "sdxl", "flux", "stable-diffusion")
@@ -54,13 +59,14 @@ class RuntimeModelState:
 
 
 class ModelRuntimeService:
-    def __init__(self, hardware_service: HardwareService, performance_tracker=None) -> None:
+    def __init__(self, hardware_service: HardwareService, model_storage_service=None, performance_tracker=None) -> None:
         self.hardware_service = hardware_service
+        self.model_storage_service = model_storage_service
         self.performance_tracker = performance_tracker
         self.state = RuntimeModelState(
-            active_llm_provider=LLM_PROVIDER,
-            active_llm_model=self._default_llm_model_for_provider(LLM_PROVIDER),
-            active_image_provider=IMAGE_PROVIDER,
+            active_llm_provider=DEFAULT_MODEL_PROVIDER or LLM_PROVIDER,
+            active_llm_model=self._default_llm_model_for_provider(DEFAULT_MODEL_PROVIDER or LLM_PROVIDER),
+            active_image_provider=DEFAULT_IMAGE_MODEL_PROVIDER or IMAGE_PROVIDER,
             active_image_model=OPENAI_IMAGE_MODEL,
             preferred_compute_device="cuda" if CUDA_PREFERRED else "cpu",
             cuda_preferred=CUDA_PREFERRED,
@@ -72,8 +78,12 @@ class ModelRuntimeService:
         )
         self.last_openai_usage: dict[str, str | int] = {}
         self.last_openai_rate_limits: dict[str, str] = {}
+        self.last_runtime_topic = ""
+        self.last_runtime_reason = ""
 
     async def initialize(self):
+        if self.model_storage_service is not None:
+            self.model_storage_service.initialize_storage()
         await self.register_default_models()
         await self.refresh_hardware_status()
         await self.scan_local_storage()
@@ -100,6 +110,8 @@ class ModelRuntimeService:
             )
 
         for provider, model_name, model_type, source, local_path, capabilities, backend, preferred_device in defaults:
+            if provider not in ENABLED_MODEL_PROVIDERS:
+                continue
             await upsert_model(
                 provider,
                 model_name,
@@ -164,7 +176,7 @@ class ModelRuntimeService:
             self.state.preferred_compute_device = "cpu"
             self.state.active_device = "CPU"
 
-        logger.info(
+        logger.debug(
             "[device_selected] preferred=%s active=%s gpu=%s",
             self.state.preferred_compute_device.upper(),
             self.state.active_device,
@@ -199,8 +211,8 @@ class ModelRuntimeService:
                 backend="local",
                 preferred_device=self.state.preferred_compute_device,
             )
-            logger.info("[model_discovered] provider=local type=llm model=%s", model_name)
-            logger.info("[local_model_detected] provider=local type=llm model=%s path=%s", model_name, path)
+            logger.debug("[model_discovered] provider=local type=llm model=%s", model_name)
+            logger.debug("[local_model_detected] provider=local type=llm model=%s path=%s", model_name, path)
 
     async def _scan_image_directory(self):
         for path in sorted(IMAGE_DIR.iterdir(), key=lambda item: item.name.lower()):
@@ -219,8 +231,8 @@ class ModelRuntimeService:
                 backend=PREFERRED_LOCAL_IMAGE_BACKEND,
                 preferred_device=self.state.preferred_compute_device,
             )
-            logger.info("[model_discovered] provider=local type=image model=%s", model_name)
-            logger.info("[local_model_detected] provider=local type=image model=%s path=%s", model_name, path)
+            logger.debug("[model_discovered] provider=local type=image model=%s", model_name)
+            logger.debug("[local_model_detected] provider=local type=image model=%s path=%s", model_name, path)
 
     async def sync_models(self, model_type: str) -> dict:
         discovered = []
@@ -240,8 +252,8 @@ class ModelRuntimeService:
                         preferred_device="cuda" if self.state.cuda_enabled else "cpu",
                         update_last_synced=True,
                     )
-                    logger.info("[model_discovered] provider=ollama type=llm model=%s", model_name)
-                    logger.info("[ollama_model_discovered] provider=ollama model=%s", model_name)
+                    logger.debug("[model_discovered] provider=ollama type=llm model=%s", model_name)
+                    logger.debug("[ollama_model_discovered] provider=ollama model=%s", model_name)
                     discovered.append(f"ollama:{model_name}")
             await self._scan_llm_directory()
 
@@ -261,8 +273,8 @@ class ModelRuntimeService:
                         preferred_device="cuda" if self.state.cuda_enabled else "cpu",
                         update_last_synced=True,
                     )
-                    logger.info("[model_discovered] provider=ollama type=image model=%s", model["model_name"])
-                    logger.info("[ollama_model_discovered] provider=ollama model=%s", model["model_name"])
+                    logger.debug("[model_discovered] provider=ollama type=image model=%s", model["model_name"])
+                    logger.debug("[ollama_model_discovered] provider=ollama model=%s", model["model_name"])
                     discovered.append(f"ollama:{model['model_name']}")
 
             await upsert_model(
@@ -310,6 +322,8 @@ class ModelRuntimeService:
     async def add_model(self, provider: str, model_name: str, model_type: str):
         provider = provider.strip().lower()
         model_name = model_name.strip()
+        if provider not in ENABLED_MODEL_PROVIDERS:
+            raise ValueError(f"Provider `{provider}` is not enabled.")
         preferred_device = ""
         if provider in {"local", "ollama", "automatic1111", "comfyui"}:
             preferred_device = "cuda" if self.state.cuda_enabled else "cpu"
@@ -324,7 +338,7 @@ class ModelRuntimeService:
             backend=provider,
             preferred_device=preferred_device,
         )
-        logger.info("[model_registered] provider=%s model=%s type=%s source=manual", provider, model_name, model_type)
+        logger.debug("[model_registered] provider=%s model=%s type=%s source=manual", provider, model_name, model_type)
 
     async def resolve_model(self, model_type: str, model_reference: str):
         cleaned = model_reference.strip()
@@ -367,6 +381,19 @@ class ModelRuntimeService:
         if model is None:
             return False, error
 
+        if model["provider"] not in ENABLED_MODEL_PROVIDERS:
+            return False, f"Provider `{model['provider']}` is not enabled."
+
+        if self.model_storage_service is not None:
+            available, message = await self.model_storage_service.ensure_model_available(
+                model["provider"],
+                model["model_name"],
+                model_type,
+            )
+            if not available:
+                return False, message
+            logger.debug("[model_storage] %s", message)
+
         availability = self._provider_ready(model["provider"])
         if model["provider"] in {"ollama", "automatic1111", "comfyui"} and not availability:
             return False, f"`{model['provider']}` is registered but not reachable right now."
@@ -388,8 +415,44 @@ class ModelRuntimeService:
 
         self._apply_device_selection()
         await self.persist_state()
-        logger.info("[model_swap] type=%s provider=%s model=%s device=%s", model_type, model["provider"], model["model_name"], self.state.active_device)
+        logger.info(
+            "Switched %s model: %s:%s",
+            model_type.upper(),
+            model["provider"],
+            model["model_name"],
+        )
         return True, f"Active {model_type} model set to {model['provider']}:{model['model_name']}."
+
+    async def pull_model(self, model_type: str, model_reference: str):
+        model, error = await self.resolve_model(model_type, model_reference)
+        if model is None:
+            cleaned = model_reference.strip()
+            if ":" in cleaned:
+                provider, model_name = cleaned.split(":", 1)
+                provider = provider.strip().lower()
+                model_name = model_name.strip()
+                if provider in ENABLED_MODEL_PROVIDERS:
+                    await self.add_model(provider, model_name, model_type)
+                    model, error = await self.resolve_model(model_type, cleaned)
+            if model is None:
+                return False, error
+
+        if self.model_storage_service is None:
+            return False, "Model storage service is not available."
+
+        return await self.model_storage_service.pull_model(
+            model["provider"],
+            model["model_name"],
+            model_type,
+        )
+
+    async def reload_runtime_state(self):
+        await self.refresh_hardware_status()
+        await self.scan_local_storage()
+        await self.sync_models("llm")
+        await self.sync_models("image")
+        await self.load_runtime_settings()
+        return "Model runtime state reloaded."
 
     async def get_models(self, model_type: str):
         return await list_models(model_type)
@@ -464,25 +527,113 @@ class ModelRuntimeService:
         elif self.state.active_device == "CPU":
             lines.append("Fallback: CPU only if needed.")
 
+        self.last_runtime_topic = "hardware_status"
+        if self.state.ollama_available:
+            self.last_runtime_reason = "Ollama is reachable at the configured endpoint."
+        else:
+            ollama_error = hardware.get("ollama_error", "")
+            if ollama_error:
+                self.last_runtime_reason = f"Ollama is unavailable because the configured endpoint did not respond successfully: {ollama_error}"
+            else:
+                self.last_runtime_reason = "Ollama is unavailable because the configured endpoint did not respond successfully."
+
         return "\n".join(lines)
 
     def answer_natural_language_query(self, text: str) -> str | None:
         lowered = text.strip().lower()
         if lowered in {"what model are you using", "what llm are you using", "what model you using"}:
+            self.last_runtime_topic = "llm_model"
+            self.last_runtime_reason = f"The active LLM runtime is currently set to {self.state.active_llm_provider}:{self.state.active_llm_model}."
             return self.get_current_model_text("llm")
         if lowered in {"what image model are you using", "what image generator are you using"}:
+            self.last_runtime_topic = "image_model"
+            self.last_runtime_reason = f"The active image runtime is currently set to {self.state.active_image_provider}:{self.state.active_image_model}."
             return self.get_current_model_text("image")
         if lowered in {"are you using ollama", "are you on ollama"}:
+            self.last_runtime_topic = "ollama_provider"
+            self.last_runtime_reason = (
+                f"The active LLM provider is {self.state.active_llm_provider}."
+                if self.state.active_llm_provider == "ollama"
+                else f"The active LLM provider is {self.state.active_llm_provider}, not ollama."
+            )
             return f"Active LLM provider: {self.state.active_llm_provider}\nOllama available: {'yes' if self.state.ollama_available else 'no'}"
         if "3090 ti" in lowered:
+            self.last_runtime_topic = "gpu_name"
+            self.last_runtime_reason = f"The detected GPU name is {self.state.gpu_name or 'not available'}."
             return f"GPU detected: {self.state.gpu_name or 'Not detected'}\nActive device: {self.state.active_device}"
         if "is ollama available" in lowered:
+            self.last_runtime_topic = "ollama_available"
+            if self.state.ollama_available:
+                self.last_runtime_reason = "Ollama is reachable at the configured local endpoint."
+            else:
+                self.last_runtime_reason = "Ollama is unavailable because the configured local endpoint is not responding successfully."
             return f"Ollama available: {'yes' if self.state.ollama_available else 'no'}"
+        if lowered in {
+            "how do we make it available?",
+            "how do we make it available",
+            "how do i make it available?",
+            "how do i make it available",
+            "how do we fix it?",
+            "how do we fix it",
+            "how do i fix it?",
+            "how do i fix it",
+        } and self.last_runtime_topic == "ollama_available":
+            return self.get_ollama_fix_text()
         if "token usage" in lowered or "rate limit" in lowered:
             details = [self.get_openai_usage_text(), self.get_openai_rate_limit_text()]
             rendered = "\n".join(part for part in details if part)
+            self.last_runtime_topic = "openai_limits"
+            self.last_runtime_reason = "This is the latest OpenAI usage and rate-limit information captured from recent API responses." if rendered else "No recent OpenAI usage or rate-limit data has been captured yet."
             return rendered or "I don't have recent OpenAI usage or rate-limit data yet."
         return None
+
+    def get_last_runtime_reason(self) -> str:
+        return self.last_runtime_reason
+
+    def get_last_runtime_topic(self) -> str:
+        return self.last_runtime_topic
+
+    def get_ollama_fix_text(self) -> str:
+        return (
+            "To make Ollama available:\n"
+            "1. Make sure Ollama is installed.\n"
+            "2. Start the Ollama app or run `ollama serve` on this machine.\n"
+            "3. Confirm it responds on the configured endpoint.\n"
+            f"Current endpoint: {OLLAMA_BASE_URL}\n"
+            "4. Run `ollama list` to verify local models are available.\n"
+            "5. Then run `!model sync` in Discord so I can discover the models."
+        )
+
+    async def activate_ollama_default(self) -> str:
+        if not self.state.ollama_available:
+            return "Ollama is not reachable right now, so I can't switch to it yet."
+
+        models = await list_models("llm")
+        ollama_models = [model for model in models if model["provider"] == "ollama" and model["enabled"]]
+        if not ollama_models:
+            return "Ollama is reachable, but I don't have any synced Ollama LLM models yet. Run `!model sync` first."
+
+        preferred_names = [
+            self.state.active_llm_model if self.state.active_llm_provider == "ollama" else "",
+            OLLAMA_MODEL,
+        ]
+
+        chosen_model = None
+        for preferred_name in preferred_names:
+            for model in ollama_models:
+                if preferred_name and model["model_name"].lower() == preferred_name.lower():
+                    chosen_model = model
+                    break
+            if chosen_model is not None:
+                break
+
+        if chosen_model is None:
+            chosen_model = ollama_models[0]
+
+        _ok, message = await self.set_active_model("llm", f"ollama:{chosen_model['model_name']}")
+        self.last_runtime_topic = "ollama_selected"
+        self.last_runtime_reason = f"The active LLM runtime was switched to ollama:{chosen_model['model_name']}."
+        return message
 
     def record_openai_metrics(self, *, usage: dict[str, int] | None = None, rate_limits: dict[str, str] | None = None):
         if usage:

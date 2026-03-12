@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -108,6 +109,26 @@ def _extract_json_object(content: str) -> dict | None:
             return None
 
     return None
+
+
+def _sanitize_model_text(content: str) -> str:
+    if not content:
+        return ""
+
+    cleaned = content.strip()
+    think_index = cleaned.lower().find("<think")
+    if think_index != -1:
+        prefix = cleaned[:think_index].strip()
+        if prefix and (len(prefix.split()) >= 3 or prefix.endswith((".", "!", "?", "`"))):
+            cleaned = prefix
+        else:
+            cleaned = re.sub(r"(?is)\b\w*<think>.*?</think>", "", cleaned)
+            cleaned = re.sub(r"(?is)<think>.*?</think>", "", cleaned)
+
+    cleaned = re.sub(r"(?is)<think>.*?</think>", "", cleaned)
+    cleaned = re.sub(r"(?im)^\s*(thinking|reasoning)\s*:\s*$", "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 class LLMService:
@@ -381,7 +402,7 @@ class LLMService:
                         (time.perf_counter() - started_at) * 1000,
                     )
 
-                content = response.choices[0].message.content
+                content = _sanitize_model_text(response.choices[0].message.content)
                 if content and content.strip():
                     return content.strip()
 
@@ -491,6 +512,7 @@ class LLMService:
             temperature=0.3,
             max_tokens=self.agentic_chat_max_tokens,
         )
+        raw = _sanitize_model_text(raw)
         parsed = _extract_json_object(raw)
 
         if parsed is None:
@@ -503,7 +525,7 @@ class LLMService:
                 "clarifying_question": "",
                 "tool_suggestion": "",
                 "tool_reason": "",
-                "answer": raw.strip(),
+                    "answer": _sanitize_model_text(raw),
                 "next_steps": [],
                 "state_update": {
                     "goal": conversation_goal or user_message[:120],
@@ -595,7 +617,7 @@ class LLMService:
                         (time.perf_counter() - started_at) * 1000,
                     )
 
-                content = response.choices[0].message.content
+                content = _sanitize_model_text(response.choices[0].message.content)
                 if content and content.strip():
                     return content.strip()
 
@@ -694,7 +716,7 @@ class LLMService:
                         (time.perf_counter() - started_at) * 1000,
                     )
 
-                content = response.choices[0].message.content
+                content = _sanitize_model_text(response.choices[0].message.content)
                 if not content or not content.strip():
                     errors.append(f"{provider}: empty extraction")
                     continue
@@ -778,7 +800,7 @@ class LLMService:
                         (time.perf_counter() - started_at) * 1000,
                     )
 
-                content = response.choices[0].message.content
+                content = _sanitize_model_text(response.choices[0].message.content)
                 if content and content.strip():
                     return content.strip()
 

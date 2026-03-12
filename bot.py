@@ -11,11 +11,13 @@ from core.config import (
 )
 from core.logging_config import setup_logging, get_logger
 from database.database import init_db
+from services.code_execution_service import CodeExecutionService
 from services.codegen_service import CodegenService
 from services.command_help_service import CommandHelpService
 from services.hardware_service import HardwareService
 from services.image_service import ImageService
 from services.llm_service import LLMService
+from services.model_storage_service import ModelStorageService
 from services.model_runtime_service import ModelRuntimeService
 from services.osint_service import OSINTService
 from services.performance_service import PerformanceTracker
@@ -41,8 +43,10 @@ class ExpenseBot(commands.Bot):
         self.voice_service = None
         self.video_service = None
         self.codegen_service = None
+        self.code_execution_service = None
         self.osint_service = None
         self.hardware_service = None
+        self.model_storage_service = None
         self.model_runtime_service = None
         self.command_help_service = None
         self.start_time = time.perf_counter()
@@ -53,8 +57,13 @@ class ExpenseBot(commands.Bot):
 
         service_started_at = time.perf_counter()
         self.hardware_service = HardwareService()
+        self.model_storage_service = ModelStorageService(
+            performance_tracker=self.performance_tracker,
+        )
+        self.model_storage_service.initialize_storage()
         self.model_runtime_service = ModelRuntimeService(
             hardware_service=self.hardware_service,
+            model_storage_service=self.model_storage_service,
             performance_tracker=self.performance_tracker,
         )
         await self.model_runtime_service.initialize()
@@ -79,6 +88,10 @@ class ExpenseBot(commands.Bot):
             llm_service=self.llm_service,
             performance_tracker=self.performance_tracker,
         )
+        self.code_execution_service = CodeExecutionService(
+            performance_tracker=self.performance_tracker,
+        )
+        self.code_execution_service.initialize_workspace()
         self.osint_service = OSINTService(performance_tracker=self.performance_tracker)
         self.performance_tracker.record_service_call(
             "startup.init_services",
@@ -94,6 +107,7 @@ class ExpenseBot(commands.Bot):
             "cogs.media_commands",
             "cogs.agent_commands",
             "cogs.runtime_commands",
+            "cogs.code_commands",
         ]
 
         for extension in extensions:
@@ -209,7 +223,11 @@ async def main():
     if not DISCORD_BOT_TOKEN:
         raise ValueError("Error: DISCORD_BOT_TOKEN not found in environment variables.")
 
-    logger.info("Bot initializing...")
+    for seconds_remaining in range(3, 0, -1):
+        logger.info("Bot starting in %s...", seconds_remaining)
+        await asyncio.sleep(1)
+
+    logger.debug("Bot initializing...")
 
     async with bot:
         await bot.start(DISCORD_BOT_TOKEN)

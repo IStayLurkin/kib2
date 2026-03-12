@@ -4,6 +4,23 @@ from core.constants import BOT_DEFAULT_PREFIX
 
 load_dotenv()
 
+
+def _parse_int_list(value: str) -> list[int]:
+    values = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            values.append(int(item))
+        except ValueError:
+            continue
+    return values
+
+
+def _parse_str_list(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 
 BOT_PREFIX = os.getenv("BOT_PREFIX", BOT_DEFAULT_PREFIX)
@@ -39,6 +56,17 @@ OSINT_ENABLED = os.getenv("OSINT_ENABLED", "true").strip().lower() in {"1", "tru
 SAFE_OSINT_ONLY = os.getenv("SAFE_OSINT_ONLY", "true").strip().lower() in {"1", "true", "yes", "on"}
 
 MEDIA_OUTPUT_DIR = os.getenv("MEDIA_OUTPUT_DIR", "generated_media")
+MODEL_STORAGE_ROOT = os.getenv("MODEL_STORAGE_ROOT", "model_storage")
+MODEL_PULL_TIMEOUT_SECONDS = int(os.getenv("MODEL_PULL_TIMEOUT_SECONDS", "1800"))
+ENABLED_MODEL_PROVIDERS = _parse_str_list(os.getenv("ENABLED_MODEL_PROVIDERS", "openai,ollama,local,hf,automatic1111,comfyui"))
+DEFAULT_MODEL_PROVIDER = os.getenv("DEFAULT_MODEL_PROVIDER", LLM_PROVIDER).strip().lower()
+
+CODE_WORKSPACE_ROOT = os.getenv("CODE_WORKSPACE_ROOT", "code_workspace")
+CODE_SANDBOX_MODE = os.getenv("CODE_SANDBOX_MODE", "subprocess").strip().lower()
+CODE_EXECUTION_TIMEOUT_SECONDS = int(os.getenv("CODE_EXECUTION_TIMEOUT_SECONDS", "20"))
+CODE_MAX_OUTPUT_CHARS = int(os.getenv("CODE_MAX_OUTPUT_CHARS", "6000"))
+CODE_ALLOWED_USER_IDS = _parse_int_list(os.getenv("CODE_ALLOWED_USER_IDS", ""))
+CODE_ALLOWED_ROLE_IDS = _parse_int_list(os.getenv("CODE_ALLOWED_ROLE_IDS", ""))
 
 MAX_PROMPT_LENGTH = int(os.getenv("MAX_PROMPT_LENGTH", "1800"))
 MAX_TTS_LENGTH = int(os.getenv("MAX_TTS_LENGTH", "1500"))
@@ -74,3 +102,4 @@ COMFYUI_HEIGHT = int(os.getenv("COMFYUI_HEIGHT", "1024"))
 IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", LLM_PROVIDER).strip().lower()
 VOICE_PROVIDER = os.getenv("VOICE_PROVIDER", LLM_PROVIDER).strip().lower()
 VIDEO_PROVIDER = os.getenv("VIDEO_PROVIDER", LLM_PROVIDER).strip().lower()
+DEFAULT_IMAGE_MODEL_PROVIDER = os.getenv("DEFAULT_IMAGE_MODEL_PROVIDER", IMAGE_PROVIDER).strip().lower()

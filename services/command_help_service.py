@@ -9,6 +9,7 @@ from core.constants import BOT_DEFAULT_PREFIX
 SECTION_LABELS = {
     "RuntimeCommands": "Model Controls",
     "MediaCommands": "Image Controls",
+    "CodeCommands": "Code Sandbox",
     "AgentCommands": "System",
     "ChatCommands": "General",
     "ExpenseCommands": "Expenses",
