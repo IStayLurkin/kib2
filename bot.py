@@ -39,6 +39,7 @@ class ExpenseBot(commands.Bot):
         self.video_service = None
         self.codegen_service = None
         self.osint_service = None
+        self.start_time = time.perf_counter()
 
     async def setup_hook(self):
         async with self.performance_tracker.track_service_call("startup.init_db"):
@@ -110,17 +111,19 @@ class ExpenseBot(commands.Bot):
 
         loaded_cogs = sorted(self.extensions.keys())
         startup_snapshot = self.performance_tracker.get_health_snapshot()
-        logger.info(
-            "[startup] user=%s prefix=%s provider=%s model=%s timezone=%s cogs=%s",
+        startup_duration_ms = (time.perf_counter() - self.start_time) * 1000
+
+        logger.info("Bot started.")
+        logger.info("Ping: %sms", f"{self.latency * 1000:.0f}")
+        logger.debug(
+            "[startup] user=%s prefix=%s provider=%s model=%s timezone=%s cogs=%s startup_ms=%.2f ws=%sms services=%s commands=%s",
             self.user,
             BOT_PREFIX,
             provider,
             model,
             BOT_TIMEZONE,
             len(loaded_cogs),
-        )
-        logger.info(
-            "[startup] ws=%sms services=%s commands=%s",
+            startup_duration_ms,
             f"{startup_snapshot['websocket_current_ms']:.0f}",
             len(startup_snapshot["services"]),
             len(startup_snapshot["commands"]),
@@ -187,7 +190,7 @@ async def main():
     if not DISCORD_BOT_TOKEN:
         raise ValueError("Error: DISCORD_BOT_TOKEN not found in environment variables.")
 
-    logger.info("[startup] booting")
+    logger.info("Bot initializing...")
 
     async with bot:
         await bot.start(DISCORD_BOT_TOKEN)
