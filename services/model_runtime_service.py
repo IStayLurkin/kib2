@@ -144,7 +144,7 @@ class ModelRuntimeService:
             "hf": True,
             "local": self.state.cuda_enabled,
         }
-        logger.info("[cuda_detected] enabled=%s gpu=%s", "yes" if self.state.cuda_enabled else "no", self.state.gpu_name or "unknown")
+        logger.debug("[cuda_detected] enabled=%s gpu=%s", "yes" if self.state.cuda_enabled else "no", self.state.gpu_name or "unknown")
         self._apply_device_selection()
         return hardware
 
