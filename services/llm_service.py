@@ -62,6 +62,7 @@ Core behavior:
 - Be natural, concise, and helpful.
 - Avoid canned filler and repetitive follow-up questions.
 - Do not use embed-style formatting in normal chat replies.
+- Do not use emojis unless the user explicitly asks for them.
 - Use remembered user facts when relevant.
 - Use recent conversation context when relevant.
 - Use conversation summaries when relevant.
@@ -191,7 +192,7 @@ def _extract_message_text(message) -> str:
 
 
 class LLMService:
-    def __init__(self, performance_tracker=None, model_runtime_service=None):
+    def __init__(self, performance_tracker=None, model_runtime_service=None, behavior_rule_service=None):
         self.provider = LLM_PROVIDER
         self.temperature = LLM_TEMPERATURE
         self.max_tokens = LLM_MAX_TOKENS
@@ -200,6 +201,7 @@ class LLMService:
         self.agentic_chat_max_tokens = AGENTIC_CHAT_MAX_TOKENS
         self.performance_tracker = performance_tracker
         self.model_runtime_service = model_runtime_service
+        self.behavior_rule_service = behavior_rule_service
         self._client_cache: dict[str, OpenAI] = {}
         self.media_output_dir = Path(MEDIA_OUTPUT_DIR)
         self.media_output_dir.mkdir(parents=True, exist_ok=True)
@@ -264,6 +266,15 @@ class LLMService:
         messages.append({"role": "user", "content": user_message})
         return messages
 
+    def _inject_behavior_rules(self, messages: List[dict], behavior_rules: List[str] | None) -> List[dict]:
+        if not behavior_rules:
+            return messages
+
+        rules_block = "Persistent behavior rules:\n" + "\n".join(f"- {rule}" for rule in behavior_rules)
+        updated = list(messages)
+        updated.insert(1, {"role": "system", "content": rules_block})
+        return updated
+
     def _openai_client(self) -> OpenAI:
         return OpenAI(api_key=OPENAI_API_KEY)
 
@@ -316,10 +327,14 @@ class LLMService:
         if self.model_runtime_service is not None:
             if media_type == "image":
                 return self.model_runtime_service.get_active_image_model()
+            if media_type == "voice":
+                return self.model_runtime_service.get_active_audio_model()
             return self.model_runtime_service.get_active_llm_model()
 
         if media_type == "image":
             return OPENAI_IMAGE_MODEL
+        if media_type == "voice":
+            return OPENAI_TTS_MODEL
         if provider == "openai":
             return OPENAI_MODEL
         if provider == "ollama":
@@ -427,8 +442,9 @@ class LLMService:
         conversation_goal: str = "",
         response_mode: str = "",
         tool_context: str = "",
+        behavior_rules: List[str] | None = None,
     ) -> str:
-        messages = self._build_messages(
+        messages = self._inject_behavior_rules(self._build_messages(
             user_display_name=user_display_name,
             user_message=user_message,
             memory=memory,
@@ -438,7 +454,7 @@ class LLMService:
             conversation_goal=conversation_goal,
             response_mode=response_mode,
             tool_context=tool_context,
-        )
+        ), behavior_rules)
 
         errors = []
         providers = self._build_provider_chain()
@@ -489,6 +505,7 @@ class LLMService:
         conversation_goal: str = "",
         response_mode: str = "",
         tool_context: str = "",
+        behavior_rules: List[str] | None = None,
     ) -> str:
         started_at = time.perf_counter()
         try:
@@ -503,6 +520,7 @@ class LLMService:
                 conversation_goal,
                 response_mode,
                 tool_context,
+                behavior_rules,
             )
         finally:
             if self.performance_tracker is not None:
@@ -522,8 +540,9 @@ class LLMService:
         conversation_goal: str = "",
         pending_question: str = "",
         tool_context: str = "",
+        behavior_rules: List[str] | None = None,
     ) -> dict:
-        messages = self._build_messages(
+        messages = self._inject_behavior_rules(self._build_messages(
             user_display_name=user_display_name,
             user_message=user_message,
             memory=memory,
@@ -533,7 +552,7 @@ class LLMService:
             conversation_goal=conversation_goal,
             response_mode="agentic",
             tool_context=tool_context,
-        )
+        ), behavior_rules)
 
         plan_prompt = {
             "role": "system",
@@ -605,6 +624,7 @@ class LLMService:
         conversation_goal: str = "",
         pending_question: str = "",
         tool_context: str = "",
+        behavior_rules: List[str] | None = None,
     ) -> dict:
         started_at = time.perf_counter()
         try:
@@ -619,6 +639,7 @@ class LLMService:
                 conversation_goal,
                 pending_question,
                 tool_context,
+                behavior_rules,
             )
         finally:
             if self.performance_tracker is not None:
@@ -631,6 +652,7 @@ class LLMService:
         self,
         recent_messages: List[Tuple[str, str, str]],
         existing_summary: str = "",
+        behavior_rules: List[str] | None = None,
     ) -> str:
         lines = []
         for author_type, content, _created_at in recent_messages:
@@ -654,6 +676,7 @@ class LLMService:
                 ),
             },
         ]
+        summary_messages = self._inject_behavior_rules(summary_messages, behavior_rules)
 
         errors = []
         providers = self._build_provider_chain()
@@ -700,6 +723,7 @@ class LLMService:
         self,
         recent_messages: List[Tuple[str, str, str]],
         existing_summary: str = "",
+        behavior_rules: List[str] | None = None,
     ) -> str:
         started_at = time.perf_counter()
         try:
@@ -707,6 +731,7 @@ class LLMService:
                 self._generate_summary_sync,
                 recent_messages,
                 existing_summary,
+                behavior_rules,
             )
         finally:
             if self.performance_tracker is not None:
@@ -719,6 +744,7 @@ class LLMService:
         self,
         user_message: str,
         existing_memory: Dict[str, str],
+        behavior_rules: List[str] | None = None,
     ) -> Dict[str, str]:
         existing_lines = []
         if existing_memory:
@@ -753,6 +779,7 @@ class LLMService:
                 ),
             },
         ]
+        extraction_messages = self._inject_behavior_rules(extraction_messages, behavior_rules)
 
         errors = []
         providers = self._build_provider_chain()
@@ -805,6 +832,7 @@ class LLMService:
         self,
         user_message: str,
         existing_memory: Dict[str, str],
+        behavior_rules: List[str] | None = None,
     ) -> Dict[str, str]:
         started_at = time.perf_counter()
         try:
@@ -812,6 +840,7 @@ class LLMService:
                 self._extract_memory_sync,
                 user_message,
                 existing_memory,
+                behavior_rules,
             )
         finally:
             if self.performance_tracker is not None:
@@ -1143,6 +1172,8 @@ class LLMService:
 
     def _text_to_speech_sync(self, text: str) -> bytes:
         provider = VOICE_PROVIDER
+        if self.model_runtime_service is not None:
+            provider = self.model_runtime_service.get_active_audio_provider()
         if provider != "openai":
             raise RuntimeError(f"Voice generation via {provider} is not wired in this build.")
 
@@ -1150,7 +1181,7 @@ class LLMService:
 
         try:
             response = client.audio.speech.create(
-                model=OPENAI_TTS_MODEL,
+                model=self._get_model_for_provider("openai", "voice"),
                 voice=OPENAI_TTS_VOICE,
                 input=text,
             )

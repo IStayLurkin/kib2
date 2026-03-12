@@ -57,6 +57,7 @@ class ChatCommands(commands.Cog):
             "codegen_service": getattr(self.bot, "codegen_service", None),
             "osint_service": getattr(self.bot, "osint_service", None),
             "model_runtime_service": getattr(self.bot, "model_runtime_service", None),
+            "behavior_rule_service": getattr(self.bot, "behavior_rule_service", None),
             "command_help_service": getattr(self.bot, "command_help_service", None),
             "bot": self.bot,
         }
@@ -96,6 +97,13 @@ class ChatCommands(commands.Cog):
         await destination.send(reply.content)
 
     async def maybe_send_tool_ack(self, destination, content: str):
+        behavior_rule_service = getattr(self.bot, "behavior_rule_service", None)
+        if behavior_rule_service is not None:
+            if behavior_rule_service.looks_like_rule_request(content):
+                return
+            if behavior_rule_service.looks_like_rule_edit_request(content):
+                return
+
         route_decision = self.tool_router.route(content)
         acknowledgements = {
             "image": "On it, generating that now...",

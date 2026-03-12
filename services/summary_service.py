@@ -21,9 +21,15 @@ async def maybe_update_summary(llm, user_id: str, channel_id: str, session_id: i
     existing_summary = await get_conversation_summary(user_id, channel_id)
 
     try:
+        behavior_rule_service = getattr(llm, "behavior_rule_service", None)
+        behavior_rules = []
+        if behavior_rule_service is not None:
+            behavior_rules = await behavior_rule_service.get_enabled_rule_texts()
+
         new_summary = await llm.generate_summary(
             recent_messages=recent_messages,
             existing_summary=existing_summary,
+            behavior_rules=behavior_rules,
         )
         if new_summary and new_summary.strip():
             await set_conversation_summary(user_id, channel_id, new_summary.strip())

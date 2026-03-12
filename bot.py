@@ -11,6 +11,7 @@ from core.config import (
 )
 from core.logging_config import setup_logging, get_logger
 from database.database import init_db
+from services.behavior_rule_service import BehaviorRuleService
 from services.code_execution_service import CodeExecutionService
 from services.codegen_service import CodegenService
 from services.command_help_service import CommandHelpService
@@ -44,6 +45,7 @@ class ExpenseBot(commands.Bot):
         self.video_service = None
         self.codegen_service = None
         self.code_execution_service = None
+        self.behavior_rule_service = None
         self.osint_service = None
         self.hardware_service = None
         self.model_storage_service = None
@@ -68,9 +70,11 @@ class ExpenseBot(commands.Bot):
         )
         await self.model_runtime_service.initialize()
         self.command_help_service = CommandHelpService()
+        self.behavior_rule_service = BehaviorRuleService()
         self.llm_service = LLMService(
             performance_tracker=self.performance_tracker,
             model_runtime_service=self.model_runtime_service,
+            behavior_rule_service=self.behavior_rule_service,
         )
         self.image_service = ImageService(
             llm_service=self.llm_service,
@@ -230,7 +234,33 @@ async def main():
     logger.debug("Bot initializing...")
 
     async with bot:
-        await bot.start(DISCORD_BOT_TOKEN)
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            try:
+                await bot.start(DISCORD_BOT_TOKEN)
+                return
+            except discord.DiscordServerError as exc:
+                if attempt >= max_attempts:
+                    raise
+                retry_delay = min(30, attempt * 5)
+                logger.warning(
+                    "Discord is temporarily unavailable. Retrying in %ss (%s/%s).",
+                    retry_delay,
+                    attempt,
+                    max_attempts,
+                )
+                await asyncio.sleep(retry_delay)
+            except discord.HTTPException as exc:
+                if getattr(exc, "status", 0) < 500 or attempt >= max_attempts:
+                    raise
+                retry_delay = min(30, attempt * 5)
+                logger.warning(
+                    "Discord returned a server error. Retrying in %ss (%s/%s).",
+                    retry_delay,
+                    attempt,
+                    max_attempts,
+                )
+                await asyncio.sleep(retry_delay)
 
 
 if __name__ == "__main__":

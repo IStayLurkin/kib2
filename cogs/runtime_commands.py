@@ -8,6 +8,7 @@ class RuntimeCommands(commands.Cog):
         self.bot = bot
         self.runtime = getattr(bot, "model_runtime_service", None)
         self.help_service = getattr(bot, "command_help_service", None)
+        self.behavior_rule_service = getattr(bot, "behavior_rule_service", None)
 
     @commands.group(name="model", invoke_without_command=True, help="Switch or inspect the active LLM model at runtime.")
     async def model_group(self, ctx: commands.Context):
@@ -97,6 +98,50 @@ class RuntimeCommands(commands.Cog):
         await self.runtime.add_model(provider, model_name, "image")
         await ctx.send(f"Registered image model `{provider}:{model_name}`.")
 
+    @commands.group(name="audiomodel", invoke_without_command=True, help="Switch or inspect the active audio/TTS model at runtime.")
+    async def audio_model_group(self, ctx: commands.Context):
+        await ctx.send(
+            self.runtime.get_current_model_text("audio")
+            + "\n\nUse `!audiomodel current`, `!audiomodel list`, `!audiomodel switch <model>`, `!audiomodel pull <model>`, `!audiomodel reload`, `!audiomodel sync`, or `!audiomodel add <provider> <model>`."
+        )
+
+    @audio_model_group.command(name="current", help="Show the active audio provider and model.")
+    async def audio_model_current(self, ctx: commands.Context):
+        await ctx.send(self.runtime.get_current_model_text("audio"))
+
+    @audio_model_group.command(name="list", help="List registered audio models.")
+    async def audio_model_list(self, ctx: commands.Context):
+        await ctx.send(await self.runtime.get_model_list_text("audio"))
+
+    @audio_model_group.command(name="set", help="Switch the active audio model at runtime.")
+    async def audio_model_set(self, ctx: commands.Context, *, model_name: str):
+        _ok, message = await self.runtime.set_active_model("audio", model_name)
+        await ctx.send(message)
+
+    @audio_model_group.command(name="switch", help="Switch the active audio model at runtime.")
+    async def audio_model_switch(self, ctx: commands.Context, *, model_name: str):
+        _ok, message = await self.runtime.set_active_model("audio", model_name)
+        await ctx.send(message)
+
+    @audio_model_group.command(name="pull", help="Pull or install an audio model into local/provider-managed storage.")
+    async def audio_model_pull(self, ctx: commands.Context, *, model_name: str):
+        _ok, message = await self.runtime.pull_model("audio", model_name)
+        await ctx.send(message)
+
+    @audio_model_group.command(name="reload", help="Reload audio model discovery and runtime state.")
+    async def audio_model_reload(self, ctx: commands.Context):
+        await ctx.send(await self.runtime.reload_runtime_state())
+
+    @audio_model_group.command(name="sync", help="Discover audio models from supported providers.")
+    async def audio_model_sync(self, ctx: commands.Context):
+        result = await self.runtime.sync_models("audio")
+        await ctx.send(f"Audio sync complete. Discovered {result['count']} models.")
+
+    @audio_model_group.command(name="add", help="Manually register an audio model.")
+    async def audio_model_add(self, ctx: commands.Context, provider: str, *, model_name: str):
+        await self.runtime.add_model(provider, model_name, "audio")
+        await ctx.send(f"Registered audio model `{provider}:{model_name}`.")
+
     @commands.command(name="cuda", help="Show CUDA and GPU status.")
     async def cuda_command(self, ctx: commands.Context, action: str | None = None):
         if action and action.strip().lower() not in {"status"}:
@@ -121,6 +166,37 @@ class RuntimeCommands(commands.Cog):
             await ctx.send(await self.help_service.build_command_help(self.bot, command_name, ctx))
             return
         await ctx.send(await self.help_service.build_command_overview(self.bot, ctx))
+
+    @commands.group(name="rule", invoke_without_command=True, help="Create, view, and manage strict persistent bot behavior rules.")
+    async def rule_group(self, ctx: commands.Context):
+        await ctx.send(
+            await self.behavior_rule_service.get_rules_text()
+            + "\n\nUse `!rule add <text>`, `!rule edit <id> <text>`, `!rule list`, `!rule delete <id>`, or `!rule clear`."
+        )
+
+    @rule_group.command(name="list", help="List all persistent behavior rules.")
+    async def rule_list(self, ctx: commands.Context):
+        await ctx.send(await self.behavior_rule_service.get_rules_text())
+
+    @rule_group.command(name="add", aliases=["set", "create"], help="Add a strict persistent behavior rule for the bot.")
+    async def rule_add(self, ctx: commands.Context, *, rule_text: str):
+        _ok, message = await self.behavior_rule_service.add_rule(rule_text, created_by=str(ctx.author.id))
+        await ctx.send(message)
+
+    @rule_group.command(name="edit", help="Edit a behavior rule by ID.")
+    async def rule_edit(self, ctx: commands.Context, rule_id: int, *, rule_text: str):
+        _ok, message = await self.behavior_rule_service.edit_rule(rule_id, rule_text)
+        await ctx.send(message)
+
+    @rule_group.command(name="delete", aliases=["remove"], help="Delete a behavior rule by ID.")
+    async def rule_delete(self, ctx: commands.Context, rule_id: int):
+        _ok, message = await self.behavior_rule_service.delete_rule(rule_id)
+        await ctx.send(message)
+
+    @rule_group.command(name="clear", help="Clear all custom behavior rules.")
+    async def rule_clear(self, ctx: commands.Context):
+        _ok, message = await self.behavior_rule_service.reset_rules()
+        await ctx.send(message)
 
 
 async def setup(bot: commands.Bot) -> None:

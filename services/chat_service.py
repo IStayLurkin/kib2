@@ -226,7 +226,48 @@ async def generate_dynamic_reply(
     try:
         model_runtime_service = services.get("model_runtime_service")
         command_help_service = services.get("command_help_service")
+        behavior_rule_service = services.get("behavior_rule_service")
         bot = services.get("bot")
+
+        behavior_rules = []
+        if behavior_rule_service is not None:
+            behavior_rules = await behavior_rule_service.get_enabled_rule_texts()
+            lowered = user_text.strip().lower()
+
+            if lowered in {"what are the rules", "show the rules", "list the rules", "what rules do you have"}:
+                return ChatReply(
+                    content=await behavior_rule_service.get_rules_text(),
+                    intent="question_answering",
+                    response_mode="direct",
+                    goal="list persistent behavior rules",
+                    tool_name="behavior_rule",
+                )
+
+            if behavior_rule_service.looks_like_rule_request(user_text):
+                rule_text = behavior_rule_service.extract_rule_text(user_text)
+                _ok, message = await behavior_rule_service.add_rule(rule_text, created_by=user_id)
+                return ChatReply(
+                    content=message,
+                    intent="tool_use_request",
+                    response_mode="direct",
+                    goal="set persistent behavior rule",
+                    tool_name="behavior_rule",
+                )
+
+            if behavior_rule_service.looks_like_rule_edit_request(user_text):
+                old_rule_text, new_rule_text = behavior_rule_service.extract_rule_replacement(user_text)
+                _ok, message = await behavior_rule_service.replace_rule(
+                    old_rule_text,
+                    new_rule_text,
+                    created_by=user_id,
+                )
+                return ChatReply(
+                    content=message,
+                    intent="tool_use_request",
+                    response_mode="direct",
+                    goal="edit persistent behavior rule",
+                    tool_name="behavior_rule",
+                )
 
         if model_runtime_service is not None:
             runtime_answer = model_runtime_service.answer_natural_language_query(user_text)
@@ -274,6 +315,14 @@ async def generate_dynamic_reply(
                     intent="question_answering",
                     response_mode="direct",
                     goal="list runtime models",
+                )
+
+            if "what audio models are available" in lowered or "what voice models are available" in lowered or "what tts models are available" in lowered:
+                return ChatReply(
+                    content=await model_runtime_service.get_model_list_text("audio"),
+                    intent="question_answering",
+                    response_mode="direct",
+                    goal="list runtime audio models",
                 )
 
             if "what local models are available" in lowered:
@@ -365,6 +414,7 @@ async def generate_dynamic_reply(
                     conversation_goal=conversation_goal,
                     pending_question=conversation_state.get("pending_question", ""),
                     tool_context=tool_context,
+                    behavior_rules=behavior_rules,
                 )
 
                 state_update = plan.get("state_update", {})
@@ -428,6 +478,7 @@ async def generate_dynamic_reply(
                 conversation_goal=conversation_goal,
                 response_mode="direct",
                 tool_context=tool_context,
+                behavior_rules=behavior_rules,
             )
             if reply and reply.strip():
                 await set_conversation_state(

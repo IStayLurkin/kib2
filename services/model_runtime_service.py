@@ -20,6 +20,7 @@ from core.config import (
     OLLAMA_MODEL,
     OPENAI_IMAGE_MODEL,
     OPENAI_MODEL,
+    OPENAI_TTS_MODEL,
     PREFERRED_LOCAL_IMAGE_BACKEND,
 )
 from core.logging_config import get_logger
@@ -49,6 +50,8 @@ class RuntimeModelState:
     active_llm_model: str
     active_image_provider: str
     active_image_model: str
+    active_audio_provider: str
+    active_audio_model: str
     preferred_compute_device: str
     cuda_preferred: bool
     cuda_enabled: bool
@@ -68,6 +71,8 @@ class ModelRuntimeService:
             active_llm_model=self._default_llm_model_for_provider(DEFAULT_MODEL_PROVIDER or LLM_PROVIDER),
             active_image_provider=DEFAULT_IMAGE_MODEL_PROVIDER or IMAGE_PROVIDER,
             active_image_model=OPENAI_IMAGE_MODEL,
+            active_audio_provider="openai",
+            active_audio_model=OPENAI_TTS_MODEL,
             preferred_compute_device="cuda" if CUDA_PREFERRED else "cpu",
             cuda_preferred=CUDA_PREFERRED,
             cuda_enabled=False,
@@ -89,12 +94,14 @@ class ModelRuntimeService:
         await self.scan_local_storage()
         await self.sync_models("llm")
         await self.sync_models("image")
+        await self.sync_models("audio")
         await self.load_runtime_settings()
 
     async def register_default_models(self):
         defaults = [
             ("openai", OPENAI_MODEL, "llm", "default", None, ["chat", "code"], "openai", ""),
             ("openai", OPENAI_IMAGE_MODEL, "image", "default", None, ["image"], "openai", ""),
+            ("openai", OPENAI_TTS_MODEL, "audio", "default", None, ["audio", "tts"], "openai", ""),
             ("ollama", OLLAMA_MODEL, "llm", "default", None, ["chat", "code"], "ollama", "cuda"),
             ("hf", HF_MODEL, "llm", "default", None, ["chat", "code"], "hf", ""),
         ]
@@ -131,6 +138,8 @@ class ModelRuntimeService:
         self.state.active_llm_model = settings.get("active_llm_model", self.state.active_llm_model)
         self.state.active_image_provider = settings.get("active_image_provider", self.state.active_image_provider)
         self.state.active_image_model = settings.get("active_image_model", self.state.active_image_model)
+        self.state.active_audio_provider = settings.get("active_audio_provider", self.state.active_audio_provider)
+        self.state.active_audio_model = settings.get("active_audio_model", self.state.active_audio_model)
         self.state.preferred_compute_device = settings.get("preferred_compute_device", self.state.preferred_compute_device)
         self.state.cuda_preferred = settings.get("cuda_preferred", str(self.state.cuda_preferred)).lower() in {"1", "true", "yes", "on"}
         self._apply_device_selection()
@@ -140,6 +149,8 @@ class ModelRuntimeService:
         await set_runtime_setting("active_llm_model", self.state.active_llm_model)
         await set_runtime_setting("active_image_provider", self.state.active_image_provider)
         await set_runtime_setting("active_image_model", self.state.active_image_model)
+        await set_runtime_setting("active_audio_provider", self.state.active_audio_provider)
+        await set_runtime_setting("active_audio_model", self.state.active_audio_model)
         await set_runtime_setting("preferred_compute_device", self.state.preferred_compute_device)
         await set_runtime_setting("cuda_preferred", "true" if self.state.cuda_preferred else "false")
 
@@ -317,6 +328,19 @@ class ModelRuntimeService:
                 )
                 discovered.append(f"comfyui:{COMFYUI_DEFAULT_MODEL}")
 
+        if model_type == "audio":
+            await upsert_model(
+                "openai",
+                OPENAI_TTS_MODEL,
+                "audio",
+                source="default",
+                enabled=True,
+                capabilities=["audio", "tts"],
+                backend="openai",
+                preferred_device="",
+                update_last_synced=True,
+            )
+
         return {"model_type": model_type, "discovered": discovered, "count": len(discovered)}
 
     async def add_model(self, provider: str, model_name: str, model_type: str):
@@ -406,9 +430,12 @@ class ModelRuntimeService:
         if model_type == "llm":
             self.state.active_llm_provider = model["provider"]
             self.state.active_llm_model = model["model_name"]
-        else:
+        elif model_type == "image":
             self.state.active_image_provider = model["provider"]
             self.state.active_image_model = model["model_name"]
+        else:
+            self.state.active_audio_provider = model["provider"]
+            self.state.active_audio_model = model["model_name"]
 
         if model["preferred_device"]:
             self.state.preferred_compute_device = model["preferred_device"]
@@ -451,6 +478,7 @@ class ModelRuntimeService:
         await self.scan_local_storage()
         await self.sync_models("llm")
         await self.sync_models("image")
+        await self.sync_models("audio")
         await self.load_runtime_settings()
         return "Model runtime state reloaded."
 
@@ -469,14 +497,21 @@ class ModelRuntimeService:
                 lines.append(usage_text)
             return "\n".join(lines)
 
+        if model_type == "image":
+            lines = [
+                f"Active image provider: {self.state.active_image_provider}",
+                f"Model: {self.state.active_image_model}",
+            ]
+            rate_text = self.get_openai_rate_limit_text()
+            if self.state.active_image_provider == "openai" and rate_text:
+                lines.append("")
+                lines.append(rate_text)
+            return "\n".join(lines)
+
         lines = [
-            f"Active image provider: {self.state.active_image_provider}",
-            f"Model: {self.state.active_image_model}",
+            f"Active audio provider: {self.state.active_audio_provider}",
+            f"Model: {self.state.active_audio_model}",
         ]
-        rate_text = self.get_openai_rate_limit_text()
-        if self.state.active_image_provider == "openai" and rate_text:
-            lines.append("")
-            lines.append(rate_text)
         return "\n".join(lines)
 
     async def get_model_list_text(self, model_type: str) -> str:
@@ -484,8 +519,15 @@ class ModelRuntimeService:
         if not models:
             return f"No {model_type} models are registered yet."
 
-        active_provider = self.state.active_llm_provider if model_type == "llm" else self.state.active_image_provider
-        active_model = self.state.active_llm_model if model_type == "llm" else self.state.active_image_model
+        if model_type == "llm":
+            active_provider = self.state.active_llm_provider
+            active_model = self.state.active_llm_model
+        elif model_type == "image":
+            active_provider = self.state.active_image_provider
+            active_model = self.state.active_image_model
+        else:
+            active_provider = self.state.active_audio_provider
+            active_model = self.state.active_audio_model
         lines = [f"Available {model_type.upper()} models:"]
         for model in models:
             marker = " (active)" if model["provider"] == active_provider and model["model_name"] == active_model else ""
@@ -549,6 +591,14 @@ class ModelRuntimeService:
             self.last_runtime_topic = "image_model"
             self.last_runtime_reason = f"The active image runtime is currently set to {self.state.active_image_provider}:{self.state.active_image_model}."
             return self.get_current_model_text("image")
+        if lowered in {"what audio model are you using", "what voice model are you using", "what tts model are you using", "what audio model are you running"}:
+            self.last_runtime_topic = "audio_model"
+            self.last_runtime_reason = f"The active audio runtime is currently set to {self.state.active_audio_provider}:{self.state.active_audio_model}."
+            return self.get_current_model_text("audio")
+        if "what audio models are available" in lowered or "what voice models are available" in lowered or "what tts models are available" in lowered:
+            self.last_runtime_topic = "audio_model_list"
+            self.last_runtime_reason = "This is the current registered audio model list."
+            return None
         if lowered in {"are you using ollama", "are you on ollama"}:
             self.last_runtime_topic = "ollama_provider"
             self.last_runtime_reason = (
@@ -690,6 +740,12 @@ class ModelRuntimeService:
 
     def get_active_image_model(self) -> str:
         return self.state.active_image_model
+
+    def get_active_audio_provider(self) -> str:
+        return self.state.active_audio_provider
+
+    def get_active_audio_model(self) -> str:
+        return self.state.active_audio_model
 
     def get_effective_local_image_backend(self) -> str:
         if self.state.active_image_provider in {"automatic1111", "comfyui"}:

@@ -7,12 +7,19 @@ DB_PATH = "bot.db"
 
 async def init_model_registry_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("""
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'model_registry'
+        """)
+        existing_table = await cursor.fetchone()
+
         await db.execute("""
-            CREATE TABLE IF NOT EXISTS model_registry (
+            CREATE TABLE IF NOT EXISTS model_registry_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 provider TEXT NOT NULL,
                 model_name TEXT NOT NULL,
-                model_type TEXT NOT NULL CHECK(model_type IN ('llm', 'image')),
+                model_type TEXT NOT NULL CHECK(model_type IN ('llm', 'image', 'audio')),
                 source TEXT NOT NULL DEFAULT 'manual',
                 enabled INTEGER NOT NULL DEFAULT 1,
                 local_path TEXT,
@@ -24,6 +31,45 @@ async def init_model_registry_db():
                 last_synced_at TEXT
             )
         """)
+
+        if existing_table:
+            await db.execute("""
+                INSERT INTO model_registry_new (
+                    id,
+                    provider,
+                    model_name,
+                    model_type,
+                    source,
+                    enabled,
+                    local_path,
+                    capabilities,
+                    backend,
+                    preferred_device,
+                    created_at,
+                    updated_at,
+                    last_synced_at
+                )
+                SELECT
+                    id,
+                    provider,
+                    model_name,
+                    model_type,
+                    source,
+                    enabled,
+                    local_path,
+                    capabilities,
+                    backend,
+                    preferred_device,
+                    created_at,
+                    updated_at,
+                    last_synced_at
+                FROM model_registry
+                WHERE model_type IN ('llm', 'image', 'audio')
+                ON CONFLICT(id) DO NOTHING
+            """)
+            await db.execute("DROP TABLE IF EXISTS model_registry")
+
+        await db.execute("ALTER TABLE model_registry_new RENAME TO model_registry")
 
         await db.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_model_registry_unique

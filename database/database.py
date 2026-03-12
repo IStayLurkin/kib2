@@ -1,4 +1,5 @@
 import aiosqlite
+from database.behavior_rules_repository import init_behavior_rules_db
 from database.chat_memory import init_chat_memory_db
 from database.budget_repository import init_budget_table
 from database.execution_repository import init_execution_db
@@ -23,6 +24,7 @@ async def init_db():
 
     await init_chat_memory_db()
     await init_budget_table()
+    await init_behavior_rules_db()
     await init_model_registry_db()
     await init_execution_db()
 

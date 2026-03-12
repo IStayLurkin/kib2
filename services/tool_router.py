@@ -24,6 +24,19 @@ class RouteDecision:
 
 
 class ToolRouter:
+    NON_MEDIA_HINTS = (
+        "rule",
+        "policy",
+        "reply",
+        "response",
+        "message",
+        "command",
+        "memory",
+        "remember",
+        "emoji",
+        "emojis",
+    )
+
     IMAGE_PATTERNS = [
         r"^(?:!image|!img)\b",
         r"\b(?:generate|make|create|draw)\b.*\b(?:image|picture|art|photo)\b",
@@ -136,9 +149,12 @@ class ToolRouter:
         )
 
     def detect_tool(self, text: str) -> str:
-        for pattern in self.IMAGE_PATTERNS:
-            if re.search(pattern, text):
-                return "image"
+        if self._looks_non_media_request(text):
+            pass
+        else:
+            for pattern in self.IMAGE_PATTERNS:
+                if re.search(pattern, text):
+                    return "image"
 
         for pattern in self.VOICE_PATTERNS:
             if re.search(pattern, text):
@@ -227,3 +243,9 @@ class ToolRouter:
 
     def _matches_any(self, text: str, patterns: list[str]) -> bool:
         return any(re.search(pattern, text) for pattern in patterns)
+
+    def _looks_non_media_request(self, text: str) -> bool:
+        lowered = text.strip().lower()
+        if not lowered.startswith(("create ", "make ", "generate ")):
+            return False
+        return any(hint in lowered for hint in self.NON_MEDIA_HINTS)

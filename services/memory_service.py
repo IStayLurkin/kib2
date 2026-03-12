@@ -43,6 +43,12 @@ def extract_memory_fact(text: str):
     cleaned = text.strip()
     lowered = cleaned.lower()
 
+    if "do not use emojis unless requested" in lowered:
+        return "emoji_preference", "Do not use emojis unless requested."
+
+    if "stop sending emojis" in lowered or "don't use emojis" in lowered or "do not use emojis" in lowered:
+        return "emoji_preference", "Do not use emojis unless requested."
+
     if "my name is " in lowered:
         start = lowered.find("my name is ") + len("my name is ")
         return "name", cleaned[start:].strip()
@@ -120,9 +126,15 @@ async def maybe_extract_ai_memory(llm, user_id: str, content: str):
         return None
 
     try:
+        behavior_rule_service = getattr(llm, "behavior_rule_service", None)
+        behavior_rules = []
+        if behavior_rule_service is not None:
+            behavior_rules = await behavior_rule_service.get_enabled_rule_texts()
+
         extracted = await llm.extract_memory(
             user_message=content,
             existing_memory=existing_memory,
+            behavior_rules=behavior_rules,
         )
     except Exception as exc:
         logger.exception("Memory extraction error: %s", exc)
