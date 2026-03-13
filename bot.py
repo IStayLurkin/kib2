@@ -57,6 +57,27 @@ class ExpenseBot(commands.Bot):
         self.command_help_service = None
         self.start_time = time.perf_counter()
 
+
+# Add this to ExpenseBot class
+    async def on_message(self, message):
+        # 1. Ignore yourself and other bots
+        if message.author.bot:
+            return
+
+        # 2. Allow commands to process normally (like !image or !code)
+        ctx = await self.get_context(message)
+        if ctx.valid:
+            await self.process_commands(message)
+            return
+
+        # 3. Handle "Natural Chat" if no command is found
+        # This is where your Dolphin-Llama3 will shine without prefix restrictions
+        if self.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
+            chat_cog = self.get_cog("ChatCommands")
+            if chat_cog:
+                # Direct call to your unfiltered chat logic
+                await chat_cog.handle_natural_chat(message)
+
     async def setup_hook(self):
         async with self.performance_tracker.track_service_call("startup.init_db"):
             await init_db()
