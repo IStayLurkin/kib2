@@ -207,6 +207,27 @@ async def _run_tool(tool_name: str, tool_input: str, services: dict | None) -> C
                 tool_name="video",
             )
 
+    if tool_name == "music":
+        music_service = services.get("music_service")
+        if music_service is None:
+            return ChatReply(
+                content="I can generate melodies, but the music service is not available right now.",
+                intent=INTENT_TOOL_USE_REQUEST,
+                response_mode="tool",
+                goal=cleaned_input,
+                tool_name="music",
+            )
+
+        melody_path = await music_service.generate_melody(cleaned_input)
+        return ChatReply(
+            content="Here’s the melody I generated.",
+            file_paths=[melody_path],
+            intent=INTENT_TOOL_USE_REQUEST,
+            response_mode="tool",
+            goal=cleaned_input,
+            tool_name="music",
+        )
+
     return None
 
 
@@ -340,6 +361,17 @@ async def generate_dynamic_reply(
                 )
 
         if command_help_service is not None and bot is not None and command_help_service.matches_natural_language_help(user_text):
+            lowered = user_text.strip().lower()
+            if "what can you do" in lowered or "what capabilities do you have" in lowered or lowered == "capabilities":
+                hidden_sections = set()
+                if any("talk about expenses unless asked" in rule.lower() for rule in behavior_rules):
+                    hidden_sections.update({"Expenses", "Budgets"})
+                return ChatReply(
+                    content=await command_help_service.build_capabilities_summary(bot, hidden_sections=hidden_sections),
+                    intent="question_answering",
+                    response_mode="direct",
+                    goal="describe bot capabilities",
+                )
             return ChatReply(
                 content=await command_help_service.build_command_overview(bot),
                 intent="question_answering",

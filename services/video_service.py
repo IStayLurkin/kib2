@@ -4,6 +4,9 @@ import logging
 import time
 from typing import Any
 
+from core.config import MEDIA_SAFETY_MODE
+from services.media_safety_service import format_media_error, is_moderation_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,13 +38,19 @@ class VideoService:
                         return self._normalize_result(result)
                     except Exception as inner_exc:
                         last_error = inner_exc
-                        logger.exception("Video generation failed via %s", method_name)
+                        if is_moderation_error(inner_exc):
+                            logger.warning("Video prompt blocked via %s", method_name)
+                        else:
+                            logger.exception("Video generation failed via %s", method_name)
                 except Exception as exc:
                     last_error = exc
-                    logger.exception("Video generation failed via %s", method_name)
+                    if is_moderation_error(exc):
+                        logger.warning("Video prompt blocked via %s", method_name)
+                    else:
+                        logger.exception("Video generation failed via %s", method_name)
 
             if last_error is not None:
-                raise RuntimeError(f"Video generation failed: {last_error}") from last_error
+                raise RuntimeError(format_media_error(last_error, "video", MEDIA_SAFETY_MODE)) from last_error
 
             raise RuntimeError("Video generation is not available on the current llm_service.")
         finally:

@@ -9,7 +9,9 @@ from math import pi, sin
 from pathlib import Path
 from typing import Any
 
+from core.config import MEDIA_SAFETY_MODE
 from core.feature_flags import MEDIA_OUTPUT_DIR
+from services.media_safety_service import format_media_error, is_moderation_error
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,7 @@ class VoiceService:
 
         started_at = time.perf_counter()
         try:
+            last_error: Exception | None = None
             if self.llm_service is not None:
                 for method_name in ("text_to_speech", "generate_speech", "tts"):
                     method = getattr(self.llm_service, method_name, None)
@@ -46,15 +49,27 @@ class VoiceService:
                         result = await method(text=text)
                         return self._normalize_result(result)
 
-                    except TypeError:
+                    except TypeError as exc:
+                        last_error = exc
                         try:
                             result = await method(text)
                             return self._normalize_result(result)
-                        except Exception:
+                        except Exception as inner_exc:
+                            last_error = inner_exc
+                            if is_moderation_error(inner_exc):
+                                logger.warning("TTS prompt blocked via %s", method_name)
+                            else:
+                                logger.exception("TTS failed via %s", method_name)
+
+                    except Exception as exc:
+                        last_error = exc
+                        if is_moderation_error(exc):
+                            logger.warning("TTS prompt blocked via %s", method_name)
+                        else:
                             logger.exception("TTS failed via %s", method_name)
 
-                    except Exception:
-                        logger.exception("TTS failed via %s", method_name)
+                if last_error is not None:
+                    raise RuntimeError(format_media_error(last_error, "audio", MEDIA_SAFETY_MODE)) from last_error
 
             logger.warning(
                 "No TTS provider configured. Returning placeholder audio tone."

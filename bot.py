@@ -19,9 +19,11 @@ from services.hardware_service import HardwareService
 from services.image_service import ImageService
 from services.llm_service import LLMService
 from services.model_storage_service import ModelStorageService
+from services.music_service import MusicService
 from services.model_runtime_service import ModelRuntimeService
 from services.osint_service import OSINTService
 from services.performance_service import PerformanceTracker
+from services.song_session_service import SongSessionService
 from services.video_service import VideoService
 from services.voice_service import VoiceService
 from tasks.task_manager import TaskManager
@@ -39,10 +41,12 @@ class ExpenseBot(commands.Bot):
         self.startup_banner_printed = False
         self.performance_tracker = PerformanceTracker()
         self.task_manager = TaskManager(self)
+        self.song_session_service = SongSessionService()
         self.llm_service = None
         self.image_service = None
         self.voice_service = None
         self.video_service = None
+        self.music_service = None
         self.codegen_service = None
         self.code_execution_service = None
         self.behavior_rule_service = None
@@ -86,6 +90,9 @@ class ExpenseBot(commands.Bot):
         )
         self.video_service = VideoService(
             llm_service=self.llm_service,
+            performance_tracker=self.performance_tracker,
+        )
+        self.music_service = MusicService(
             performance_tracker=self.performance_tracker,
         )
         self.codegen_service = CodegenService(

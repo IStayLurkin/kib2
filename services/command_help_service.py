@@ -78,6 +78,39 @@ class CommandHelpService:
 
         return "\n".join(lines)
 
+    async def build_capabilities_summary(
+        self,
+        bot: commands.Bot,
+        ctx: commands.Context | None = None,
+        hidden_sections: set[str] | None = None,
+    ) -> str:
+        grouped: dict[str, list[str]] = defaultdict(list)
+        hidden_sections = hidden_sections or set()
+
+        for command in sorted(bot.commands, key=lambda item: item.name):
+            if isinstance(command, commands.Group):
+                for subcommand in sorted(command.commands, key=lambda item: item.name):
+                    if not await self._can_show_command(subcommand, ctx):
+                        continue
+                    grouped[self._section_name(subcommand)].append(subcommand.qualified_name)
+                continue
+
+            if not await self._can_show_command(command, ctx):
+                continue
+            grouped[self._section_name(command)].append(command.qualified_name)
+
+        if not grouped:
+            return "I don't have any active capabilities right now."
+
+        lines = ["I can help with these areas:"]
+        for section in sorted(grouped.keys()):
+            if section in hidden_sections:
+                continue
+            sample_commands = ", ".join(f"`!{name}`" for name in grouped[section][:4])
+            lines.append(f"- {section}: {sample_commands}")
+        lines.append("Use `!help` or `!commands` for the full command list.")
+        return "\n".join(lines)
+
     async def build_command_help(self, bot: commands.Bot, command_name: str, ctx: commands.Context | None = None) -> str:
         prefix = getattr(bot, "command_prefix", BOT_DEFAULT_PREFIX)
         if not isinstance(prefix, str):
@@ -114,6 +147,7 @@ class CommandHelpService:
         triggers = (
             "what commands do you have",
             "what can you do",
+            "what capabilities do you have",
             "show commands",
             "list commands",
             "help",

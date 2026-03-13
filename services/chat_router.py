@@ -1,15 +1,17 @@
+import re
+
+
 def is_greeting(text: str) -> bool:
-    greetings = ["hello", "hi", "hey", "yo", "sup"]
-    return any(word in text for word in greetings)
+    return bool(re.fullmatch(r"(?:hello|hi|hey|yo|sup|what's up|whats up)", text.strip()))
 
 
 def is_thanks(text: str) -> bool:
     thanks_words = ["thanks", "thank you", "ty"]
-    return any(word in text for word in thanks_words)
+    return any(re.search(rf"\b{re.escape(word)}\b", text) for word in thanks_words)
 
 
 def is_help_request(text: str) -> bool:
-    help_words = ["help", "commands", "how", "what can you do"]
+    help_words = ["help", "commands", "what can you do", "what capabilities do you have", "capabilities"]
     return any(word in text for word in help_words)
 
 
@@ -33,7 +35,7 @@ def is_private_info_request(text: str) -> bool:
 
 
 def get_help_response() -> str:
-    return "Use `!help` for expense commands or `!helpchat` for chat commands."
+    return "Use `!help` or `!commands` to see what I can do."
 
 
 def get_expense_response(text: str) -> str:

@@ -8,6 +8,7 @@ from discord.ext import commands
 from core.config import MAX_PROMPT_LENGTH, MAX_TTS_LENGTH
 from core.feature_flags import IMAGE_ENABLED, VIDEO_ENABLED, VOICE_ENABLED
 from services.image_service import ImageService
+from services.music_service import MusicService
 from services.video_service import VideoService
 from services.voice_service import VoiceService
 
@@ -31,6 +32,11 @@ class MediaCommands(commands.Cog):
             bot,
             "video_service",
             VideoService(llm_service=llm_service, performance_tracker=performance_tracker),
+        )
+        self.music_service = getattr(
+            bot,
+            "music_service",
+            MusicService(performance_tracker=performance_tracker),
         )
 
     @commands.command(name="image", aliases=["img"])
@@ -103,6 +109,38 @@ class MediaCommands(commands.Cog):
                 await ctx.send(str(exc))
             except Exception as exc:
                 await ctx.send(f"Video generation failed: {exc}")
+
+    @commands.command(name="melody", aliases=["music", "tune"])
+    async def melody_command(self, ctx: commands.Context, *, prompt: str) -> None:
+        prompt = prompt.strip()
+        if not prompt:
+            await ctx.send("Provide a prompt. Example: `!melody calm dreamy piano loop`")
+            return
+
+        if len(prompt) > MAX_PROMPT_LENGTH:
+            await ctx.send(f"Prompt is too long. Keep it under {MAX_PROMPT_LENGTH} characters.")
+            return
+
+        await ctx.send("On it, composing that melody now...")
+        async with ctx.typing():
+            try:
+                melody_path = await self.music_service.generate_melody(prompt)
+                await ctx.send(file=discord.File(melody_path, filename=Path(melody_path).name))
+            except Exception as exc:
+                await ctx.send(f"Melody generation failed: {exc}")
+
+    @commands.command(name="song", aliases=["vocals", "sing"])
+    async def song_command(self, ctx: commands.Context) -> None:
+        song_session_service = getattr(self.bot, "song_session_service", None)
+        if song_session_service is None:
+            await ctx.send("Song generation setup is not available right now.")
+            return
+
+        question = song_session_service.begin_session(str(ctx.author.id), str(ctx.channel.id))
+        await ctx.send(
+            "Let's build your vocal clip.\n"
+            f"{question}"
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

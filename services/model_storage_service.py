@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
-from core.config import ENABLED_MODEL_PROVIDERS, MODEL_PULL_TIMEOUT_SECONDS, MODEL_STORAGE_ROOT
+from core.config import ENABLED_MODEL_PROVIDERS, MODEL_PULL_TIMEOUT_SECONDS, MODEL_STORAGE_ROOT, OLLAMA_CLI_PATH
 from core.logging_config import get_logger
 from database.model_registry import get_model, upsert_model
 
@@ -89,11 +90,14 @@ class ModelStorageService:
         manifest_path = self._ollama_manifest_path(model_name)
         started = asyncio.get_running_loop().time()
         logger.info("Pulling AI model: ollama:%s", model_name)
+        ollama_executable = self._resolve_ollama_cli()
+        if ollama_executable is None:
+            return False, "The `ollama` CLI is not installed or not available on PATH."
 
         try:
             completed = await asyncio.to_thread(
                 subprocess.run,
-                ["ollama", "pull", model_name],
+                [ollama_executable, "pull", model_name],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -134,3 +138,24 @@ class ModelStorageService:
     def _ollama_manifest_path(self, model_name: str) -> Path:
         safe_name = model_name.replace(":", "__")
         return self.provider_storage_dir("ollama") / f"{safe_name}.json"
+
+    def _resolve_ollama_cli(self) -> str | None:
+        if OLLAMA_CLI_PATH:
+            configured = Path(OLLAMA_CLI_PATH)
+            if configured.exists():
+                return str(configured)
+
+        on_path = shutil.which("ollama")
+        if on_path:
+            return on_path
+
+        candidate_paths = [
+            Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe",
+            Path("C:/Program Files/Ollama/ollama.exe"),
+        ]
+
+        for candidate in candidate_paths:
+            if candidate.exists():
+                return str(candidate)
+
+        return None

@@ -54,6 +54,12 @@ class ToolRouter:
         r"\b(?:generate|make|create)\b.*\bvideo\b",
     ]
 
+    MUSIC_PATTERNS = [
+        r"^(?:!melody|!music|!tune)\b",
+        r"\b(?:generate|make|create|compose)\b.*\b(?:melody|music|tune|beat|loop)\b",
+        r"^(?:compose|make|create)\s+(?:me\s+)?(?:a\s+)?(?:melody|tune|beat|loop)\b",
+    ]
+
     CODE_PATTERNS = [
         r"^(?:!code|!fixcode|!explaincode|!refactor)\b",
         r"\b(?:write code|fix code|debug code|refactor code|explain code|review this code|analyze this code)\b",
@@ -164,6 +170,10 @@ class ToolRouter:
             if re.search(pattern, text):
                 return "video"
 
+        for pattern in self.MUSIC_PATTERNS:
+            if re.search(pattern, text):
+                return "music"
+
         for pattern in self.CODE_PATTERNS:
             if re.search(pattern, text):
                 return "code"
@@ -182,6 +192,7 @@ class ToolRouter:
             "image": [r"^!image\s+", r"^!img\s+"],
             "voice": [r"^!tts\s+", r"^!say\s+"],
             "video": [r"^!video\s+", r"^!animate\s+"],
+            "music": [r"^!melody\s+", r"^!music\s+", r"^!tune\s+"],
             "code": [r"^!code\s+", r"^!fixcode\s+", r"^!explaincode\s+", r"^!refactor\s+"],
             "osint": [r"^!osint\s+", r"^!whois\s+", r"^!domain\s+"],
         }
@@ -211,6 +222,18 @@ class ToolRouter:
                     if extracted:
                         return extracted
 
+        if tool_name == "music":
+            music_patterns = [
+                r"^(?:compose)\s+(?:me\s+)?(?:a\s+)?(?:melody|tune|beat|loop)\s*",
+                r"^(?:make|create|generate)\s+(?:me\s+)?(?:a\s+)?(?:melody|tune|beat|loop)\s*",
+            ]
+
+            for pattern in music_patterns:
+                if re.search(pattern, lowered, flags=re.IGNORECASE):
+                    extracted = re.sub(pattern, "", cleaned, flags=re.IGNORECASE).strip(" .,:;-")
+                    if extracted:
+                        return extracted
+
         if tool_name == "osint":
             match = re.search(r"(?:whois|rdap|dns|domain lookup|look up this domain)\s+(.+)", cleaned, flags=re.IGNORECASE)
             if match:
@@ -219,7 +242,7 @@ class ToolRouter:
         return cleaned
 
     def _tool_needs_more_input(self, tool_name: str, tool_input: str) -> bool:
-        if tool_name in {"image", "video", "voice", "code", "osint"}:
+        if tool_name in {"image", "video", "voice", "music", "code", "osint"}:
             return len(tool_input.strip()) < 3
         return False
 

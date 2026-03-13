@@ -54,6 +54,7 @@ class ChatCommands(commands.Cog):
             "image_service": getattr(self.bot, "image_service", None),
             "voice_service": getattr(self.bot, "voice_service", None),
             "video_service": getattr(self.bot, "video_service", None),
+            "music_service": getattr(self.bot, "music_service", None),
             "codegen_service": getattr(self.bot, "codegen_service", None),
             "osint_service": getattr(self.bot, "osint_service", None),
             "model_runtime_service": getattr(self.bot, "model_runtime_service", None),
@@ -109,6 +110,7 @@ class ChatCommands(commands.Cog):
             "image": "On it, generating that now...",
             "voice": "On it, making that audio now...",
             "video": "On it, starting that video request now...",
+            "music": "On it, composing that melody now...",
         }
 
         ack_message = acknowledgements.get(route_decision.tool_name)
@@ -146,6 +148,50 @@ class ChatCommands(commands.Cog):
         await add_chat_message(session_id, "bot", reply.content)
         await self.send_chat_message(destination, reply)
         await maybe_update_summary(self.llm, user_id, channel_id, session_id)
+
+    async def maybe_handle_song_session(self, destination, author, channel, content: str) -> bool:
+        song_session_service = getattr(self.bot, "song_session_service", None)
+        music_service = getattr(self.bot, "music_service", None)
+        if song_session_service is None or music_service is None:
+            return False
+
+        user_id = str(author.id)
+        channel_id = str(channel.id)
+
+        if song_session_service.looks_like_song_request(content) and not song_session_service.has_session(user_id, channel_id):
+            question = song_session_service.begin_session(user_id, channel_id)
+            await destination.send("Let's build your vocal clip.")
+            await destination.send(question)
+            return True
+
+        if not song_session_service.has_session(user_id, channel_id):
+            return False
+
+        result = song_session_service.handle_response(user_id, channel_id, content)
+        if result["status"] == "retry":
+            await destination.send(result["message"])
+            return True
+
+        if result["status"] == "question":
+            await destination.send(result["message"])
+            return True
+
+        if result["status"] == "complete":
+            await destination.send(
+                "On it, generating your vocal clip now...\n"
+                f"{result['summary']}"
+            )
+            async with destination.typing():
+                melody_path = await music_service.generate_song_clip(
+                    vibe=result["vibe"],
+                    bpm=result["bpm"],
+                    voice_style=result["voice"],
+                    vocal_mode=result["vocal_mode"],
+                )
+            await destination.send(file=discord.File(melody_path))
+            return True
+
+        return False
 
     @commands.command(aliases=["latency"])
     async def ping(self, ctx):
@@ -277,6 +323,9 @@ class ChatCommands(commands.Cog):
             await add_chat_message(session_id, "bot", reply)
             await self.send_chat_message(message.channel, reply)
             await maybe_update_summary(self.llm, user_id, channel_id, session_id)
+            return
+
+        if await self.maybe_handle_song_session(message.channel, message.author, message.channel, content):
             return
 
         await self.handle_chat_turn(message.channel, message.author, message.channel, content)
