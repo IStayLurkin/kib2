@@ -25,6 +25,9 @@ from core.config import (
     MUSIC_REQUEST_TIMEOUT_SECONDS,
 )
 from core.feature_flags import MEDIA_OUTPUT_DIR
+from core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 class MusicService:
     def __init__(self, performance_tracker=None) -> None:
@@ -38,19 +41,19 @@ class MusicService:
     async def _unload_ollama(self):
         """Standard 3090 Ti VRAM clearance for heavy foundation models."""
         try:
-            print("[DEBUG] Clearing VRAM for Studio Audio Generation...")
+            logger.debug("Clearing VRAM for Studio Audio Generation...")
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     "http://localhost:11434/api/chat",
                     json={"model": "qwen3-coder:7b", "keep_alive": 0}
                 ) as resp:
                     if resp.status == 200:
-                        print("[DEBUG] Qwen3 ejected from VRAM.")
+                        logger.debug("Qwen3 ejected from VRAM.")
             await asyncio.sleep(1)
             torch.cuda.empty_cache()
             gc.collect()
         except Exception as e:
-            print(f"[DEBUG] Unload failed: {e}")
+            logger.debug("Unload failed: %s", e)
 
     async def generate_melody(self, prompt: str) -> str:
         """Utilizes Stable Audio Open for high-fidelity loops/melodies."""
@@ -62,7 +65,7 @@ class MusicService:
         try:
             return await asyncio.to_thread(self._generate_melody_local, prompt, str(path))
         except Exception as e:
-            print(f"[ERROR] Melody Gen Failed: {e}")
+            logger.error("Melody generation failed: %s", e)
             return ""
 
     async def generate_song_clip(
@@ -84,7 +87,7 @@ class MusicService:
         try:
             return await asyncio.to_thread(self._generate_yue_studio, prompt, str(path))
         except Exception as e:
-            print(f"[ERROR] YuE Studio Gen Failed: {e}")
+            logger.error("YuE Studio generation failed: %s", e)
             return ""
         
 
@@ -97,7 +100,7 @@ class MusicService:
             if mode:
                 self.vocal_mode = mode.strip().lower()
             
-            print(f"[DEBUG] Studio Config Updated: {self.bpm} BPM | {self.voice_style} | {self.vocal_mode}")
+            logger.debug("Studio Config Updated: %s BPM | %s | %s", self.bpm, self.voice_style, self.vocal_mode)
 
     def _generate_melody_local(self, prompt: str, filepath: str) -> str:
         """Sync worker for Stable Audio Open."""
@@ -123,7 +126,7 @@ class MusicService:
     def _generate_yue_studio(self, prompt: str, filepath: str) -> str:
         """Sync worker for YuE Studio Vocals (VRAM heavy)."""
         if self.active_model_type != "yue":
-            print("[DEBUG] Loading YuE Foundation Model (32B-Audio)...")
+            logger.debug("Loading YuE Foundation Model (32B-Audio)...")
             # 4-bit quantization is often needed for YuE on 24GB cards
             self.pipeline = YueFoundationModel.from_pretrained(
                 "m-a-p/YuE-s1-7B-anneal-en-cot",

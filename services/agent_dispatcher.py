@@ -56,24 +56,28 @@ class AgentDispatcher:
 
         return graph.compile()
 
+    def classify_intent(self, content: str) -> str:
+        """Return 'draw', 'sing', or 'chat' without running the full workflow."""
+        lowered = content.lower()
+        creative_override = any(word in lowered for word in ["imagine", "create", "fictional", "make up", "pretend"])
+        music_triggers = ["sing", "song", "melody", "music", "audio", "vocal", "lyrics"]
+        media_triggers = ["draw", "generate", "image", "visual", "create a picture", "flux"]
+
+        if any(trigger in lowered for trigger in music_triggers):
+            if not creative_override and "real" in lowered:
+                return "chat"
+            return "sing"
+
+        if any(trigger in lowered for trigger in media_triggers):
+            if not creative_override and "real" in lowered:
+                return "chat"
+            return "draw"
+
+        return "chat"
+
     def router_node(self, state: AgentState):
-            content = state["messages"][-1].lower()
-            
-            creative_override = any(word in content for word in ["imagine", "create", "fictional", "make up", "pretend"])
-            music_triggers = ["sing", "song", "melody", "music", "audio", "vocal", "lyrics"]
-            media_triggers = ["draw", "generate", "image", "visual", "create a picture", "flux"]
-            
-            if any(trigger in content for trigger in music_triggers):
-                if not creative_override and "real" in content:
-                    return {**state, "next_step": "chat"} 
-                return {**state, "next_step": "sing"}
-                
-            if any(trigger in content for trigger in media_triggers):
-                if not creative_override and "real" in content:
-                    return {**state, "next_step": "chat"}
-                return {**state, "next_step": "draw"}
-                
-            return {**state, "next_step": "chat"}
+        next_step = self.classify_intent(state["messages"][-1])
+        return {**state, "next_step": next_step}
 
     async def coding_node(self, state: AgentState):
         """Dialed-in node that injects Brandon's memory and hardware context."""
@@ -111,33 +115,36 @@ class AgentDispatcher:
 
     async def media_node(self, state: AgentState):
         """FLUX.2 Image generation path with Safety Lock for VRAM Guard."""
-        self.bot.is_generating = True
+        async with self.bot.generating_lock:
+            self.bot.generating_count += 1
         try:
             prompt = state["messages"][-1]
             image_path = await self.image_gen.generate_image(prompt)
-            
+
             if image_path and os.path.exists(image_path):
                 return {
                     "messages": ["🎨 **Kiba Engine:** Image rendering complete. Patching file..."],
-                    "file_path": image_path 
+                    "file_path": image_path,
                 }
             return {"messages": ["❌ Image generation failed. Check terminal logs."], "file_path": None}
         finally:
-            self.bot.is_generating = False
+            async with self.bot.generating_lock:
+                self.bot.generating_count -= 1
 
     async def music_agent_node(self, state: AgentState):
         """YuE / Stable Audio generation path with Safety Lock for VRAM Guard."""
-        self.bot.is_generating = True
+        async with self.bot.generating_lock:
+            self.bot.generating_count += 1
         try:
             prompt = state["messages"][-1]
-            
+
             if any(word in prompt.lower() for word in ["sing", "lyrics", "song", "vocal"]):
                 audio_path = await self.music_gen.generate_song_clip(
-                    vibe="cinematic", 
-                    bpm=120, 
-                    voice_style="studio", 
+                    vibe="cinematic",
+                    bpm=120,
+                    voice_style="studio",
                     vocal_mode="lyrics",
-                    lyrics=prompt
+                    lyrics=prompt,
                 )
             else:
                 audio_path = await self.music_gen.generate_melody(prompt)
@@ -145,11 +152,12 @@ class AgentDispatcher:
             if audio_path and os.path.exists(audio_path):
                 return {
                     "messages": ["🎵 **Studio Specialist:** Audio synthesis complete. Uploading track..."],
-                    "file_path": audio_path
+                    "file_path": audio_path,
                 }
             return {"messages": ["❌ Audio generation failed. Check VRAM availability."], "file_path": None}
         finally:
-            self.bot.is_generating = False
+            async with self.bot.generating_lock:
+                self.bot.generating_count -= 1
 
     async def run(self, user_id: str, channel_id: str, content: str):
         """Dispatcher entry point. Now correctly routes channel_id for memory lookup."""

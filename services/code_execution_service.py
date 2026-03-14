@@ -34,6 +34,11 @@ DANGEROUS_PATTERNS = (
     "import winreg",
     "open('.env'",
     'open(".env"',
+    "eval(",
+    "exec(",
+    "__import__",
+    "compile(",
+    "globals()",
 )
 
 

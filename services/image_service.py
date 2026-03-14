@@ -1,12 +1,17 @@
 import os
 import time
 import gc
+import threading
 import torch
 import asyncio
-import subprocess
 import aiohttp
 import warnings
 from typing import Optional
+from core.logging_config import get_logger
+from services.hardware_service import HardwareService
+
+logger = get_logger(__name__)
+_hardware = HardwareService()
 
 try:
     from transformers import BitsAndBytesConfig, Mistral3ForConditionalGeneration
@@ -27,18 +32,16 @@ class ImageService:
         self.output_dir = "outputs/images"
         self._last_activity = 0
         self._unload_task = None
+        self._generation_lock = threading.Lock()
         os.makedirs(self.output_dir, exist_ok=True)
 
     def _get_vram_usage(self) -> int:
-        try:
-            cmd = "nvidia-smi --query-gpu=memory.used --format=csv,nounits,noheader"
-            return int(subprocess.check_output(cmd, shell=False).decode().strip())
-        except: return 0
+        return _hardware.get_vram_usage_mb()
 
     def _purge_vram(self):
         """Clears the 3090 Ti completely before swapping engines."""
         if self.pipeline is not None:
-            print(f"[DEBUG] Purging {self.current_engine} from VRAM...")
+            logger.debug("Purging %s from VRAM...", self.current_engine)
             self.pipeline = None
             gc.collect()
             torch.cuda.empty_cache()
@@ -49,7 +52,7 @@ class ImageService:
         if self.current_engine == "FLUX" and self.pipeline is not None:
             return
         self._purge_vram()
-        print("[DEBUG] Loading FLUX.2 (4-bit) to GPU...")
+        logger.debug("Loading FLUX.2 (4-bit) to GPU...")
         
         transformer = Flux2Transformer2DModel.from_pretrained(
             FLUX2_REPO, subfolder="transformer", torch_dtype=torch.bfloat16,
@@ -70,7 +73,7 @@ class ImageService:
         if self.current_engine == "SDXL" and self.pipeline is not None:
             return
         self._purge_vram()
-        print("[DEBUG] Loading SDXL (FP16) to GPU...")
+        logger.debug("Loading SDXL (FP16) to GPU...")
         
         self.pipeline = StableDiffusionXLPipeline.from_pretrained(
             SDXL_REPO, torch_dtype=torch.float16, variant="fp16", use_safetensors=True
@@ -89,15 +92,19 @@ class ImageService:
         filename = f"kiba_{mode.lower()}_{int(time.time())}.png"
         filepath = os.path.join(self.output_dir, filename)
         try:
-            return await asyncio.to_thread(self._generate_sync, prompt, filepath, mode, callback)
+            return await asyncio.to_thread(self._generate_sync_locked, prompt, filepath, mode, callback)
         except Exception as e:
-            print(f"[ERROR] {mode} Failed: {e}")
+            logger.error("%s generation failed: %s", mode, e)
             return None
+
+    def _generate_sync_locked(self, prompt, filepath, mode, callback):
+        with self._generation_lock:
+            return self._generate_sync(prompt, filepath, mode, callback)
 
     def _generate_sync(self, prompt, filepath, mode, callback):
             try: 
                 main_loop = asyncio.get_event_loop()
-            except: 
+            except Exception:
                 main_loop = None
 
             if mode == "FLUX":

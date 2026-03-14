@@ -160,6 +160,25 @@ class HardwareService:
             "error": "",
         }
 
+    def get_vram_usage_mb(self) -> int:
+        """Returns current GPU VRAM usage in MB via nvidia-smi, or 0 on failure."""
+        executable = shutil.which("nvidia-smi")
+        if not executable:
+            return 0
+        try:
+            result = subprocess.run(
+                [executable, "--query-gpu=memory.used", "--format=csv,nounits,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if result.returncode == 0:
+                return int(result.stdout.strip())
+        except Exception as exc:
+            logger.debug("VRAM usage query failed: %s", exc)
+        return 0
+
     def _detect_simple_json_endpoint(self, base_url: str, path: str) -> bool:
         base_url = base_url.strip()
         if not base_url:

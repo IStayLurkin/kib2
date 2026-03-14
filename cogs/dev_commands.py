@@ -17,6 +17,7 @@ class DevCommands(commands.Cog):
             "cogs.agent_commands",
             "cogs.runtime_commands",
             "cogs.code_commands",
+            "tasks.vram_guard",
         ]
 
     @commands.command()

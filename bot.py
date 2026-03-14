@@ -1,11 +1,6 @@
 # --- MUST BE AT THE ABSOLUTE TOP ---
 import os
 # Force all 33GB+ of AI models to stay on your G: drive project folder
-# --- MUST BE AT THE ABSOLUTE TOP ---
-import os
-# Redirection for HuggingFace (FLUX/YuE)
-os.environ['HF_HOME'] = r'G:\code\python\learn_python\bot\discord_bot_things\models\huggingface'
-os.environ['TORCH_HOME'] = r'G:\code\python\learn_python\bot\discord_bot_things\models\torch'
 
 # Redirection for Ollama (Qwen3) - Ensures the bot knows where the engine sits
 os.environ['OLLAMA_MODELS'] = r'G:\ollamamodels'
@@ -57,8 +52,11 @@ class ExpenseBot(commands.Bot):
         self.song_session_service = SongSessionService()
         
         # Hardware-Aware State Flags
-        # This prevents the VRAM Guard from clearing memory during active generation
-        self.is_generating = False 
+        # Counter + lock prevent the VRAM Guard from clearing memory during active generation.
+        # Use bot.generating_lock with async with, increment generating_count on start,
+        # decrement on finish. VRAMGuard checks generating_count > 0.
+        self.generating_count = 0
+        self.generating_lock = asyncio.Lock()
         
         self.llm_service = None
         self.image_service = None

@@ -1,17 +1,17 @@
 import torch
 import gc
 import asyncio
-import subprocess
-import logging
 from discord.ext import tasks, commands
+from core.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class VRAMGuard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.hardware_service = getattr(bot, "hardware_service", None)
         # Threshold set to 21GB. If idle VRAM exceeds this, we flush.
-        self.vram_threshold_mb = 21504 
+        self.vram_threshold_mb = 21504
         self.guard_loop.start()
 
     def cog_unload(self):
@@ -19,14 +19,9 @@ class VRAMGuard(commands.Cog):
         self.guard_loop.cancel()
 
     def _get_vram_usage_mb(self) -> int:
-        try:
-            # Secure method: List syntax + shell=False
-            cmd = ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,nounits,noheader"]
-            result = subprocess.check_output(cmd, shell=False).decode('utf-8').strip()
-            return int(result)
-        except Exception as e:
-            logger.error(f"[VRAM Guard] Hardware query failed: {e}")
-            return 0
+        if self.hardware_service:
+            return self.hardware_service.get_vram_usage_mb()
+        return 0
 
     # --- NEW: MANUAL CLEAR ADDITION ---
     async def force_clear(self):
@@ -52,17 +47,15 @@ class VRAMGuard(commands.Cog):
         Periodically checks VRAM levels. 
         If high usage is detected while the bot is IDLE, it performs a cache purge.
         """
-        # CRITICAL: Check the safety flag from AgentDispatcher
-        is_busy = getattr(self.bot, "is_generating", False)
-        
-        if is_busy:
+        # CRITICAL: Check the safety counter from AgentDispatcher
+        if getattr(self.bot, "generating_count", 0) > 0:
             # Do not cross wires while a model is actively rendering
             return
 
         current_usage = self._get_vram_usage_mb()
         
         if current_usage > self.vram_threshold_mb:
-            print(f"[VRAM GUARD] High idle usage detected: {current_usage}MB. Initializing stabilizer...")
+            logger.info("[VRAM GUARD] High idle usage detected: %sMB. Initializing stabilizer...", current_usage)
             
             # 1. Python Garbage Collection
             gc.collect()
@@ -74,13 +67,13 @@ class VRAMGuard(commands.Cog):
                 
             new_usage = self._get_vram_usage_mb()
             freed = current_usage - new_usage
-            print(f"[VRAM GUARD] Stabilization complete. Freed {freed}MB. Current: {new_usage}MB.")
+            logger.info("[VRAM GUARD] Stabilization complete. Freed %sMB. Current: %sMB.", freed, new_usage)
 
     @guard_loop.before_loop
     async def before_guard_loop(self):
         """Wait until the bot is fully logged in before starting the monitor."""
         await self.bot.wait_until_ready()
-        print("[VRAM GUARD] 3090 Ti Hardware Monitor active.")
+        logger.info("[VRAM GUARD] 3090 Ti Hardware Monitor active.")
 
 async def setup(bot):
     await bot.add_cog(VRAMGuard(bot))

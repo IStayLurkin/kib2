@@ -123,3 +123,6 @@ MUSIC_STUDIO_API_KEY = os.getenv("MUSIC_STUDIO_API_KEY", "").strip()
 MUSIC_REQUEST_TIMEOUT_SECONDS = int(os.getenv("MUSIC_REQUEST_TIMEOUT_SECONDS", "180"))
 MUSIC_DEFAULT_QUALITY = os.getenv("MUSIC_DEFAULT_QUALITY", "studio").strip().lower()
 MEDIA_SAFETY_MODE = os.getenv("MEDIA_SAFETY_MODE", "none").strip().lower()
+
+GALLERY_CHANNEL_ID = os.getenv("GALLERY_CHANNEL_ID", "").strip()
+GPU_TOTAL_VRAM_MB = int(os.getenv("GPU_TOTAL_VRAM_MB", "24576"))

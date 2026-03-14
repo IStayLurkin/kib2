@@ -11,25 +11,46 @@ from core.constants import (
     BOT_ALLOWED_CHAT_CHANNELS,
     CHAT_COOLDOWN_SECONDS,
 )
+from core.config import GALLERY_CHANNEL_ID, GPU_TOTAL_VRAM_MB
 from database.chat_memory import (
     add_chat_message,
     get_or_create_session,
 )
 from services.llm_service import LLMService
 from services.agent_dispatcher import AgentDispatcher
-from services.summary_service import maybe_update_summary 
+from services.chat_service import generate_dynamic_reply
+from services.summary_service import maybe_update_summary
+from core.logging_config import get_logger
+from core.utils import send_chunked
+
+logger = get_logger(__name__)
 
 class ChatCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.user_cooldowns = {}
-        # Force local LLM initialization
         self.llm = getattr(bot, "llm_service", None) or LLMService()
         self.allowed_chat_channels = BOT_ALLOWED_CHAT_CHANNELS
-        # Initialize the LangGraph Dispatcher
         self.dispatcher = AgentDispatcher(bot)
-        # Reference to the image service for easy access
         self.image_service = getattr(bot, "image_service", None)
+        self.hardware_service = getattr(bot, "hardware_service", None)
+
+    def _build_services(self) -> dict:
+        """Assemble the services dict expected by chat_service.generate_dynamic_reply."""
+        bot = self.bot
+        return {
+            "llm": self.llm,
+            "bot": bot,
+            "image_service": getattr(bot, "image_service", None),
+            "voice_service": getattr(bot, "voice_service", None),
+            "video_service": getattr(bot, "video_service", None),
+            "music_service": getattr(bot, "music_service", None),
+            "osint_service": getattr(bot, "osint_service", None),
+            "codegen_service": getattr(bot, "codegen_service", None),
+            "model_runtime_service": getattr(bot, "model_runtime_service", None),
+            "command_help_service": getattr(bot, "command_help_service", None),
+            "behavior_rule_service": getattr(bot, "behavior_rule_service", None),
+        }
 
     def is_on_cooldown(self, user_id: int, seconds: float = CHAT_COOLDOWN_SECONDS) -> bool:
         now = time.monotonic()
@@ -52,8 +73,8 @@ class ChatCommands(commands.Cog):
     @commands.command(name="status", aliases=["kiba", "kb"])
     async def kiba_dashboard(self, ctx):
         """Displays the 3090 Ti Status Dashboard."""
-        used_vram = self._get_vram_usage()
-        total_vram = 24576 
+        used_vram = self.hardware_service.get_vram_usage_mb() if self.hardware_service else 0
+        total_vram = GPU_TOTAL_VRAM_MB
         vram_pct = round((used_vram / total_vram) * 100, 1)
         
         active_engine = "Ollama (Qwen3-Coder)"
@@ -128,15 +149,16 @@ class ChatCommands(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name="dossier", aliases=["intel", "research"])
+    @commands.cooldown(1, 60, commands.BucketType.user)
     async def dossier(self, ctx, target: str):
         """Triggers the new 2026 Agentic OSINT Research Loop."""
         osint_svc = getattr(self.bot, "osint_service", None)
         if not osint_svc:
             return await ctx.send("❌ OSINT Service not active.")
-            
+
         async with ctx.typing():
             report = await osint_svc.run_dossier(target)
-            await ctx.send(report)
+            await send_chunked(ctx, report)
 
     # --- IMAGE GENERATION COMMANDS ---
 
@@ -151,7 +173,6 @@ class ChatCommands(commands.Cog):
         await self.handle_image_request(ctx, prompt, mode="SDXL")
 
     async def handle_image_request(self, ctx, prompt: str, mode: str = "FLUX"):
-        gallery_channel_id = 1482242041755861032
         icon = "🎨" if mode == "FLUX" else "⚡"
         
         status_msg = await ctx.send(f"{icon} **Kiba is initializing {mode} on the 3090 Ti...**\n[░░░░░░░░░░] 0%")
@@ -181,7 +202,7 @@ class ChatCommands(commands.Cog):
             await ctx.send(content=f"Request: *{prompt}* ({mode} Engine)", file=image_file)
 
             # Archive to Gallery
-            gallery_channel = self.bot.get_channel(gallery_channel_id)
+            gallery_channel = self.bot.get_channel(int(GALLERY_CHANNEL_ID)) if GALLERY_CHANNEL_ID else None
             if gallery_channel:
                 archive_file = discord.File(path, filename=f"archive_{mode.lower()}.png")
                 await gallery_channel.send(
@@ -192,10 +213,6 @@ class ChatCommands(commands.Cog):
             await status_msg.edit(content=f"❌ **{mode} Engine Error.** Check terminal.")
 
     # --- CORE CHAT LOGIC ---
-
-    def _get_vram_usage(self):
-        cmd = ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,nounits,noheader"]
-        return int(subprocess.check_output(cmd, shell=False).decode().strip())
 
     async def handle_chat_turn(self, destination, author, channel, content: str):
         user_id = str(author.id)
@@ -210,40 +227,72 @@ class ChatCommands(commands.Cog):
                     if voice_svc:
                         temp_path = f"temp_{attachment.filename}"
                         await attachment.save(temp_path)
-                        transcription = await voice_svc.speech_to_text(temp_path)
-                        content = f"{content} [Transcribed Voice]: {transcription}"
-                        if os.path.exists(temp_path): os.remove(temp_path)
+                        try:
+                            transcription = await voice_svc.speech_to_text(temp_path)
+                            content = f"{content} [Transcribed Voice]: {transcription}"
+                        finally:
+                            if os.path.exists(temp_path):
+                                os.remove(temp_path)
 
         await add_chat_message(session_id, "user", content)
 
         async with destination.typing():
             try:
-                response_text, file_path = await self.dispatcher.run(user_id, channel_id, content)
-                
-                if response_text:
-                    await add_chat_message(session_id, "bot", response_text)
-                    await destination.send(response_text)
-                
-                if file_path and os.path.exists(file_path):
-                    filename = f"kiba_{int(time.time())}.png"
-                    file = discord.File(file_path, filename=filename)
-                    await destination.send(file=file)
-                
-                if not file_path:
+                intent = self.dispatcher.classify_intent(content)
+
+                if intent in ("draw", "sing"):
+                    # Media path — AgentDispatcher handles VRAM locking and generation
+                    response_text, file_path = await self.dispatcher.run(user_id, channel_id, content)
+
+                    if response_text:
+                        await add_chat_message(session_id, "bot", response_text)
+                        await send_chunked(destination, response_text)
+
+                    if file_path and os.path.exists(file_path):
+                        filename = f"kiba_{int(time.time())}.png"
+                        await destination.send(file=discord.File(file_path, filename=filename))
+
+                else:
+                    # Text path — full chat_service pipeline with tool routing,
+                    # agentic planning, behavior rules, and graceful fallback chains
+                    display_name = getattr(author, "display_name", str(author))
+                    reply = await generate_dynamic_reply(
+                        llm=self.llm,
+                        display_name=display_name,
+                        user_id=user_id,
+                        channel_id=channel_id,
+                        session_id=session_id,
+                        user_text=content,
+                        services=self._build_services(),
+                    )
+
+                    if reply.content:
+                        await add_chat_message(session_id, "bot", reply.content)
+                        await send_chunked(destination, reply.content)
+
+                    for fp in reply.file_paths:
+                        if fp and os.path.exists(fp):
+                            filename = f"kiba_{int(time.time())}.png"
+                            await destination.send(file=discord.File(fp, filename=filename))
+
                     await maybe_update_summary(self.llm, user_id, channel_id, session_id)
 
-            except Exception as e:
-                print(f"[ERROR] Dispatcher failed: {e}")
+            except Exception:
+                logger.exception("Chat turn failed")
                 await destination.send("❌ Neural sync error. Check terminal.")
 
     async def handle_natural_chat(self, message: discord.Message):
-        if message.author.bot: return
+        if message.author.bot:
+            return
+        if not self.is_allowed_chat_channel(message):
+            return
         content = message.content.strip()
         if self.bot.user in message.mentions:
             mention_strings = [f"<@{self.bot.user.id}>", f"<@!{self.bot.user.id}>"]
             for m in mention_strings:
                 content = content.replace(m, "").strip()
-        if not content: return
+        if not content:
+            return
         await self.handle_chat_turn(message.channel, message.author, message.channel, content)
 
     @commands.command(aliases=["latency"])

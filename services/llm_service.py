@@ -210,19 +210,11 @@ class LLMService:
         self.media_output_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_active_model_name(self) -> str:
-            """Determines active model and aggressively blocks 404s even from the DB."""
-            model = OLLAMA_MODEL or "kiba"
-            
-            # 1. Check the database
-            if self.model_runtime_service is not None:
-                self.provider = self.model_runtime_service.get_active_llm_provider()
-                model = self.model_runtime_service.get_active_llm_model()
-                
-            # 2. THE KILL SWITCH: If the DB or Env says qwen, force it back to kiba
-            if self.provider == "ollama" and ("qwen" in model.lower() or not model):
-                return "kiba"
-                
-            return model
+        """Returns the active model name from the runtime service, falling back to config."""
+        if self.model_runtime_service is not None:
+            self.provider = self.model_runtime_service.get_active_llm_provider()
+            return self.model_runtime_service.get_active_llm_model()
+        return OLLAMA_MODEL or "kiba"
 
     def _build_messages(
             self,
@@ -315,17 +307,19 @@ class LLMService:
         return client
 
     def _build_provider_chain(self) -> List[str]:
+        fallbacks = ["ollama", "openai", "hf"]
         if self.model_runtime_service is not None:
             active_provider = self.model_runtime_service.get_active_llm_provider()
             self.provider = active_provider
-            return ["ollama", "openai", "hf"]
+            chain = [active_provider] + [p for p in fallbacks if p != active_provider]
+            return chain
 
         chains = {
-            "openai": ["ollama", "openai", "hf"],
-            "hf": ["ollama", "hf", "openai"],
+            "openai": ["openai", "ollama", "hf"],
+            "hf": ["hf", "ollama", "openai"],
             "ollama": ["ollama", "openai", "hf"],
         }
-        return chains.get(self.provider, ["ollama", "openai", "hf"])
+        return chains.get(self.provider, fallbacks)
 
     def _get_model_for_provider(self, provider: str, media_type: str = "llm") -> str:
         if self.model_runtime_service is not None:
@@ -875,10 +869,6 @@ class LLMService:
             try:
                 # 1. Get base model
                 model = self._get_model_for_provider(provider, "llm")
-                
-                # 2. THE FINAL STAKE: Use your custom 'kiba' model for local 3090 Ti
-                if provider == "ollama":
-                    model = "kiba:latest"
                 
                 response = self._create_chat_completion(
                     provider,
