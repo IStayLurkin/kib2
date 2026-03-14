@@ -1,10 +1,11 @@
 # Hardware Index
---extra-index-url https://download.pytorch.org/whl/cu124
+# Upgraded from cu124 to cu128 to resolve CVE-2025-32434 and CVE-2024-48063 in torch 2.6.0
+--extra-index-url https://download.pytorch.org/whl/cu128
 
 # Core GPU Stack
-torch==2.6.0+cu124
-torchvision==0.21.0+cu124
-torchaudio==2.6.0+cu124
+torch==2.7.1+cu128
+torchvision==0.22.1+cu128
+torchaudio==2.7.1+cu128
 
 # AI Frameworks & Client
 openai>=2.28.0,<3
