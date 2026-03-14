@@ -1,10 +1,53 @@
-.venv/
+# Python
 __pycache__/
-.env
-generated_media/
-full_bot_audit.txt
-*.mp3
-*.png
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
 
-*.db
+# Virtual environments
+.venv/
 .venv_claude/
+venv/
+
+# Environment / secrets
+.env
+.env.*
+
+# Database
+*.db
+*.db-journal
+
+# Generated media
+generated_media/
+outputs/
+*.png
+*.jpg
+*.jpeg
+*.mp3
+*.wav
+*.mp4
+*.ogg
+*.m4a
+
+# User data
+expenses.json
+code_workspace/
+
+# Audit / temp files
+full_bot_audit.txt
+temp_*
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
